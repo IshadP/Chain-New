@@ -1,0 +1,23 @@
+{
+  "name": "supply-chain-demo",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "hardhat:node": "cd apps/contracts && npx hardhat node --hostname 0.0.0.0",
+    "hardhat:deploy": "cd apps/contracts && npx hardhat run scripts/deploy.js --network localhost",
+    "seed": "cd apps/contracts && npx hardhat run scripts/seed.js --network localhost",
+    "firebase:emulator": "cd apps/web && firebase emulators:start --only firestore,auth",
+    "web:dev": "cd apps/web && npm run dev",
+    "web:build": "cd apps/web && npm run build",
+    "setup": "npm install && cd apps/contracts && npm install && cd ../web && npm install"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  }
+}
