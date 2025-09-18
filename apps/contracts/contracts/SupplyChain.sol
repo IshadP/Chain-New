@@ -1,5 +1,3 @@
-// FILE: apps/contracts/contracts/SupplyChain.sol
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
@@ -7,14 +5,15 @@ pragma solidity ^0.8.24;
  * @title SupplyChain
  * @dev A smart contract to track product batches with role-based access control.
  * This version uses contract-generated numeric batch IDs and stores e-way bills on-chain.
+ * This version allows for decentralized manufacturer onboarding and removes the single owner admin role.
  */
 contract SupplyChain {
     // --- State Variables ---
 
-    address public owner; // The manufacturer who deployed the contract
     uint256 public batchCounter; // Used to generate unique batch IDs
 
     // Role management
+    mapping(address => bool) public isManufacturer;
     mapping(address => bool) public isDistributor;
     mapping(address => bool) public isRetailer;
 
@@ -48,21 +47,19 @@ contract SupplyChain {
         uint256 quantity,
         string ewaybillNo
     );
-
     event BatchTransferred(
         uint256 indexed batchId,
         address indexed from,
         address indexed to
     );
-
     event BatchReceived(uint256 indexed batchId, address indexed receiver);
     event RoleGranted(address indexed user, string role);
     event RoleRevoked(address indexed user, string role);
 
     // --- Modifiers ---
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Caller is not the owner");
+    modifier onlyManufacturer() {
+        require(isManufacturer[msg.sender], "Caller is not a manufacturer");
         _;
     }
 
@@ -85,31 +82,38 @@ contract SupplyChain {
     // --- Constructor ---
 
     constructor() {
-        owner = msg.sender;
         batchCounter = 0;
+        isManufacturer[msg.sender] = true; // The deployer is the first manufacturer
+        emit RoleGranted(msg.sender, "Manufacturer");
     }
 
     // --- Role Management Functions ---
 
-    function grantDistributorRole(address _distributor) external onlyOwner {
+    function grantManufacturerRole(address _manufacturer) external {
+        require(_manufacturer != address(0), "Invalid address");
+        isManufacturer[_manufacturer] = true;
+        emit RoleGranted(_manufacturer, "Manufacturer");
+    }
+
+    function grantDistributorRole(address _distributor) external onlyManufacturer {
         require(_distributor != address(0), "Invalid address");
         isDistributor[_distributor] = true;
         emit RoleGranted(_distributor, "Distributor");
     }
 
-    function revokeDistributorRole(address _distributor) external onlyOwner {
+    function revokeDistributorRole(address _distributor) external onlyManufacturer {
         require(_distributor != address(0), "Invalid address");
         isDistributor[_distributor] = false;
         emit RoleRevoked(_distributor, "Distributor");
     }
 
-    function grantRetailerRole(address _retailer) external onlyOwner {
+    function grantRetailerRole(address _retailer) external onlyManufacturer {
         require(_retailer != address(0), "Invalid address");
         isRetailer[_retailer] = true;
         emit RoleGranted(_retailer, "Retailer");
     }
 
-    function revokeRetailerRole(address _retailer) external onlyOwner {
+    function revokeRetailerRole(address _retailer) external onlyManufacturer {
         require(_retailer != address(0), "Invalid address");
         isRetailer[_retailer] = false;
         emit RoleRevoked(_retailer, "Retailer");
@@ -118,14 +122,15 @@ contract SupplyChain {
     // --- Core Functions ---
 
     /**
-     * @dev Creates a new batch of products. Only the owner (manufacturer) can call this.
+     * @dev Creates a new batch of products.
+     * Only a manufacturer can call this.
      * The batchId is generated automatically.
      * @param _quantity The number of items in the batch.
      * @param _ewaybillNo The e-way bill number for tracking.
      */
     function createBatch(uint256 _quantity, string memory _ewaybillNo)
         external
-        onlyOwner
+        onlyManufacturer
     {
         require(_quantity > 0, "Quantity must be greater than zero");
         require(bytes(_ewaybillNo).length > 0, "E-way bill number cannot be empty");

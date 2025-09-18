@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import { SupplyChainABI } from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
+import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../lib/deployment.json';
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
@@ -26,7 +26,7 @@ interface Recipient {
   display_name: string | null;
   wallet_address: string;
 }
-
+SupplyChainABI = SupplyChainArtifact.abi;
 /**
  * This updated TransferModal fetches a live list of potential recipients
  * from the database instead of using mock data.

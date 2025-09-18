@@ -31,7 +31,7 @@ export default clerkMiddleware(async (auth, req: NextRequest) => {
       return NextResponse.redirect(dashboardUrl)
     } else {
       console.log('Redirecting from root to onboarding')
-      const onboardingUrl = new URL('/', req.url)
+      const onboardingUrl = new URL('/onboarding', req.url)
       return NextResponse.redirect(onboardingUrl)
     }
   }

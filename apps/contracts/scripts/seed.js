@@ -4,7 +4,7 @@ const path = require("path");
 
 async function main() {
   const deploymentPath = path.join(__dirname, "../../web/lib/deployment.json");
-  
+
   if (!fs.existsSync(deploymentPath)) {
     console.error("Deployment file not found. Please run deployment first.");
     process.exit(1);
@@ -18,21 +18,28 @@ async function main() {
 
   console.log("Seeding data...");
 
-  // Create sample products
-  const products = [
-    { name: "Premium Coffee Beans", quantity: 100, batch: "BATCH001" },
-    { name: "Organic Tea Leaves", quantity: 50, batch: "BATCH002" },
-    { name: "Artisan Chocolate", quantity: 75, batch: "BATCH003" }
+  // Grant roles
+  let tx = await supplyChain.connect(manufacturer).grantDistributorRole(distributor.address);
+  await tx.wait();
+  console.log(`Granted Distributor role to: ${distributor.address}`);
+
+  tx = await supplyChain.connect(manufacturer).grantRetailerRole(retailer.address);
+  await tx.wait();
+  console.log(`Granted Retailer role to: ${retailer.address}`);
+
+  // Create sample batches
+  const batches = [
+    { quantity: 100, ewaybillNo: "EWAY001" },
+    { quantity: 50, ewaybillNo: "EWAY002" },
+    { quantity: 75, ewaybillNo: "EWAY003" },
   ];
 
-  for (const product of products) {
-    const tx = await supplyChain.connect(manufacturer).createProduct(
-      product.name,
-      product.quantity,
-      product.batch
-    );
+  for (const batch of batches) {
+    const tx = await supplyChain
+      .connect(manufacturer)
+      .createBatch(batch.quantity, batch.ewaybillNo);
     await tx.wait();
-    console.log(`Created product: ${product.name} (${product.batch})`);
+    console.log(`Created batch with e-way bill: ${batch.ewaybillNo}`);
   }
 
   console.log("Seeding completed!");

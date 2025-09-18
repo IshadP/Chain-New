@@ -6,6 +6,9 @@ require("@nomicfoundation/hardhat-toolbox");
 module.exports = {
   solidity: "0.8.24",
   networks: {
+    hardhat:{
+      chainId: 31337
+    },
     localhost: {
       url: "http://127.0.0.1:8545",
       // This change allows your Hardhat node to be accessible from other computers
