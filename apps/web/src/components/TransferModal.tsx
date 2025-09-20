@@ -14,84 +14,95 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../lib/deployment.json';
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Skeleton } from "./ui/skeleton";
+import { useRouter } from "next/navigation";
 
-// Define the structure of the recipient data we expect from our API
 interface Recipient {
-  display_name: string | null;
+  id: string;
   wallet_address: string;
+  role: string;
 }
+
 const SupplyChainABI = SupplyChainArtifact.abi;
-/**
- * This updated TransferModal fetches a live list of potential recipients
- * from the database instead of using mock data.
- */
+
 export function TransferModal({ batchId }: { batchId: string }) {
   const [open, setOpen] = useState(false);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [isLoadingRecipients, setIsLoadingRecipients] = useState(false);
   const [selectedRecipient, setSelectedRecipient] = useState<string>("");
   const { toast } = useToast();
-  const { address: actorAddress } = useAccount();
-  const { data: hash, writeContract, isPending } = useWriteContract();
+  const router = useRouter();
 
-  // Fetch the list of recipients when the modal is opened
+  const { data: hash, writeContract, isPending, error: contractError } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
+
+  // Fetch recipients when the modal opens
   useEffect(() => {
     if (open) {
       setIsLoadingRecipients(true);
       fetch('/api/users/recipients')
-        .then(res => res.json())
-        .then((data: Recipient[]) => {
-          setRecipients(data);
+        .then(res => {
+          if (!res.ok) throw new Error('Failed to fetch');
+          return res.json();
         })
+        .then((data: Recipient[]) => setRecipients(data))
         .catch(err => {
           console.error("Failed to fetch recipients:", err);
           toast({ title: "Error", description: "Could not load recipient list.", variant: "destructive" });
         })
-        .finally(() => {
-          setIsLoadingRecipients(false);
-        });
+        .finally(() => setIsLoadingRecipients(false));
     }
   }, [open, toast]);
 
+  // Handle the on-chain transfer
   const handleTransfer = () => {
     if (!selectedRecipient) {
-      toast({ title: "Error", description: "Please select a recipient.", variant: "destructive" });
+      toast({ title: "Validation Error", description: "Please select a recipient.", variant: "destructive" });
       return;
     }
+    console.log(`Transferring batch ${batchId} to ${selectedRecipient}`);
     writeContract({
       address: deployment.address as `0x${string}`,
       abi: SupplyChainABI,
       functionName: 'transferBatch',
-      args: [BigInt(batchId), selectedRecipient as `0x${string}`],
+      args: [batchId as `0x${string}`, selectedRecipient as `0x${string}`], // IMPORTANT: Pass batchId as a string (bytes16)
     });
   };
   
-  const { data: receipt, isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
-
+  // Handle off-chain updates after successful on-chain transaction
   useEffect(() => {
-    if (isConfirmed && receipt && actorAddress) {
-      toast({ title: "Success", description: `Batch ${batchId} transferred on-chain.` });
-      
-      fetch('/api/history/add', {
+    if (isConfirmed) {
+      toast({ title: "On-Chain Success!", description: "Batch has been transferred." });
+
+      // Update off-chain data
+      fetch('/api/inventory/transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           batchId,
-          eventType: 'Transferred',
-          actorAddress,
-          details: `Transferred to ${selectedRecipient.slice(0, 10)}...`,
+          recipientWallet: selectedRecipient,
         }),
-      }).then(() => {
-        setOpen(false); // Close modal on success
+      })
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to update off-chain data");
+        toast({ title: "Off-Chain Success!", description: "Database updated."});
+        setOpen(false);
+        router.refresh(); // Refresh the page to show updated batch state
+      })
+      .catch(err => {
+        console.error("Off-chain update failed:", err);
+        toast({ title: "CRITICAL ERROR", description: `On-chain transfer succeeded but DB update failed. Batch ID: ${batchId}`, variant: "destructive", duration: 10000 });
       });
     }
-  }, [isConfirmed, receipt, actorAddress, batchId, selectedRecipient, toast]);
+    if(contractError){
+        toast({ title: "Contract Error", description: contractError.message, variant: "destructive" });
+    }
+  }, [isConfirmed, contractError, batchId, selectedRecipient, toast, router]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -101,7 +112,7 @@ export function TransferModal({ batchId }: { batchId: string }) {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Transfer Batch</DialogTitle>
-          <DialogDescription>Select a recipient to transfer batch ID: {batchId}</DialogDescription>
+          <DialogDescription>Select a recipient for batch ID: {batchId.slice(0,12)}...</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-4">
           <Label htmlFor="recipient">Recipient</Label>
@@ -114,11 +125,12 @@ export function TransferModal({ batchId }: { batchId: string }) {
               </SelectTrigger>
               <SelectContent>
                 {recipients.length > 0 ? recipients.map(r => (
-                  <SelectItem key={r.wallet_address} value={r.wallet_address}>
-                    {r.display_name ?? 'Unnamed User'} - {r.wallet_address.slice(0,10)}...
+                  <SelectItem key={r.id} value={r.wallet_address}>
+                    <span className="font-mono">{r.wallet_address.slice(0,10)}...</span>
+                    <span className="ml-2 text-muted-foreground capitalize">({r.role})</span>
                   </SelectItem>
                 )) : (
-                  <div className="p-4 text-center text-sm text-gray-500">No recipients found.</div>
+                  <div className="p-4 text-center text-sm text-gray-500">No available recipients found.</div>
                 )}
               </SelectContent>
             </Select>

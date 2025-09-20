@@ -1,11 +1,141 @@
 // FILE: apps/web/src/lib/dataservice.ts
 
-import { supabase } from "./supabase";
+import { createClient } from '@supabase/supabase-js';
+import { supabase } from "./supabase"; // Your existing client-side client
 
 /**
  * This file serves as the data access layer for the application.
  * It contains all the functions that interact with the Supabase database.
  */
+
+// ==================================================================
+// HELPER FUNCTIONS
+// ==================================================================
+
+// Helper function to create a Supabase client with the service role key.
+const getSupabaseAdmin = () => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+
+    if (!supabaseUrl || !serviceKey) {
+        throw new Error('Supabase URL or service key is missing from environment variables.');
+    }
+
+    return createClient(supabaseUrl, serviceKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
+}
+
+/**
+ * Aggressively cleans a string by trimming whitespace and removing any newline characters.
+ * @param str The string to clean.
+ * @returns The cleaned string.
+ */
+const cleanString = (str: string | null | undefined): string => {
+    if (!str) return '';
+    // This regex removes newline characters (\n, \r) globally.
+    return str.trim().replace(/(\r\n|\n|\r)/gm, "");
+}
+
+
+// ==================================================================
+// USER PROFILE FUNCTIONS
+// ==================================================================
+
+export const upsertUserProfile = async (profile: {
+  id: string;
+  role: 'manufacturer' | 'distributor' | 'retailer';
+  wallet_address: string;
+}) => {
+  try {
+    const cleanId = cleanString(profile.id);
+    const cleanWallet = cleanString(profile.wallet_address);
+
+    if (!cleanId) throw new Error("User ID is required.");
+    if (!profile.role) throw new Error("User role is required.");
+    if (!cleanWallet) throw new Error("Wallet address is required.");
+
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .upsert({
+        id: cleanId,
+        role: profile.role,
+        wallet_address: cleanWallet,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase error upserting user profile:", error);
+      throw new Error(`Database error: ${error.message}`);
+    }
+    
+    if (!data) {
+        throw new Error('No data returned from database after upsert');
+    }
+
+    console.log("Successfully upserted user profile:", data);
+    return data;
+  } catch (error) {
+    console.error("Error in upsertUserProfile:", error);
+    throw error;
+  }
+};
+
+
+export const getAllProfiles = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*');
+
+    if (error) {
+      throw new Error(`Failed to fetch profiles: ${error.message}`);
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error in getAllProfiles:', error);
+    return [];
+  }
+}
+
+/**
+ * NEW FUNCTION
+ * Fetches all users who are distributors or retailers, excluding the current user.
+ */
+export const getPotentialRecipients = async (currentUserId: string) => {
+    try {
+        const cleanedCurrentUserId = cleanString(currentUserId);
+        if (!cleanedCurrentUserId) {
+            throw new Error("Current user ID is required to fetch recipients.");
+        }
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, wallet_address, role')
+            // Exclude the current user from the list
+            .not('id', 'eq', cleanedCurrentUserId)
+            // Only include users who can receive batches
+            .in('role', ['distributor', 'retailer']);
+
+        if (error) {
+            throw new Error(`Failed to fetch recipients: ${error.message}`);
+        }
+
+        return data || [];
+    } catch (error) {
+        console.error('Error in getPotentialRecipients:', error);
+        return [];
+    }
+};
+
+
 
 // ==================================================================
 // INVENTORY (BATCHES) FUNCTIONS
@@ -23,50 +153,29 @@ export const createInventoryItem = async (item: {
   description?: string | null;
   cost?: number | null;
 }) => {
-  console.log("Creating inventory item with data (quantity excluded):", item);
-  
-  // Input validation (quantity check removed)
-  if (!item.batch_id?.trim()) {
-    throw new Error('Batch ID is required and cannot be empty');
-  }
-  if (!item.product_name?.trim()) {
-    throw new Error('Product name is required and cannot be empty');
-  }
-  if (!item.manufacturer_id?.trim()) {
-    throw new Error('Manufacturer ID is required and cannot be empty');
-  }
-  if (!item.current_holder_wallet?.trim()) {
-    throw new Error('Current holder wallet is required and cannot be empty');
-  }
-  if (!item.eway_bill_no?.trim()) {
-    throw new Error('E-way bill number is required and cannot be empty');
-  }
-   if (!item.category?.trim()) {
-    throw new Error('Category is required');
-  }
-  
   try {
-    const { data, error } = await supabase
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const { data, error } = await supabaseAdmin
       .from('inventory')
       .insert({
-        // quantity field is removed from the insert operation
-        batch_id: item.batch_id.trim(),
+        batch_id: cleanString(item.batch_id),
         product_name: item.product_name.trim(),
-        manufacturer_id: item.manufacturer_id.trim(),
-        current_holder_wallet: item.current_holder_wallet.trim(),
+        manufacturer_id: cleanString(item.manufacturer_id),
+        current_holder_wallet: cleanString(item.current_holder_wallet),
         eway_bill_no: item.eway_bill_no.trim(),
         categories: item.category.trim(),
         internal_batch_no: item.internal_batch_no?.trim() || null,
         created_at: item.created_at,
         description: item.description?.trim() || null,
-        cost: item.cost || null
+        cost: item.cost || null,
+        status: 'Received', // <-- ADD THIS LINE
       })
       .select()
       .single();
     
     if (error) {
       console.error("Supabase error creating inventory item:", error);
-      // Specific error handling remains
       if (error.code === '23505') {
         throw new Error(`Batch ID '${item.batch_id}' already exists`);
       }
@@ -81,43 +190,72 @@ export const createInventoryItem = async (item: {
     return data;
   } catch (error) {
     console.error("Error in createInventoryItem:", error);
-    throw error; // Re-throw so the API route can handle it
+    throw error;
   }
 };
 
-// Original function - gets all batches (keep for admin use cases)
-export const getAllBatches = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('inventory')
-      .select('*')
-      .order('created_at', { ascending: false });
-      
-    if (error) {
-      throw new Error(`Failed to fetch batches: ${error.message}`);
+export const transferBatchOffChain = async (batchId: string, recipientWallet: string) => {
+    try {
+        const supabaseAdmin = getSupabaseAdmin();
+        const { data, error } = await supabaseAdmin
+            .from('inventory')
+            .update({
+                current_holder_wallet: cleanString(recipientWallet), // Directly set the new holder
+                status: 'InTransit', // Mirror the on-chain status
+                updated_at: new Date().toISOString(),
+            })
+            .eq('batch_id', cleanString(batchId))
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    } catch (error) {
+        console.error("Error in transferBatchOffChain:", error);
+        throw error;
     }
-    
-    return data || [];
-  } catch (error) {
-    console.error('Error in getAllBatches:', error);
-    return [];
-  }
 };
 
-// Fixed function - gets batches filtered by manufacturer_id
+/**
+ * UPDATED FUNCTION
+ * Updates the batch status to 'Received'.
+ */
+export const receiveBatchOffChain = async (batchId: string) => {
+    try {
+        const supabaseAdmin = getSupabaseAdmin();
+        const { data, error } = await supabaseAdmin
+            .from('inventory')
+            .update({
+                status: 'Received', // Mirror the on-chain status
+                updated_at: new Date().toISOString(),
+            })
+            .eq('batch_id', cleanString(batchId))
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    } catch (error) {
+        console.error("Error in receiveBatchOffChain:", error);
+        throw error;
+    }
+};
+
+
+
 export const getBatchesByManufacturer = async (manufacturerId: string) => {
   try {
-    const manid = manufacturerId.trim();
-    if (!manid) {
+    const cleanManId = cleanString(manufacturerId); // Use the cleaning function here
+    if (!cleanManId) {
       throw new Error('Manufacturer ID is required');
     }
 
-    console.log(`Fetching batches for manufacturer ID: ${manid}`);
+    console.log(`Fetching batches for cleaned manufacturer ID: '${cleanManId}'`);
 
     const { data, error } = await supabase
       .from('inventory')
       .select('*')
-      .eq('manufacturer_id', manid)
+      .eq('manufacturer_id', cleanManId) // Query with the cleaned ID
       .order('created_at', { ascending: false });
       
     if (error) {
@@ -129,24 +267,23 @@ export const getBatchesByManufacturer = async (manufacturerId: string) => {
     return data || [];
   } catch (error) {
     console.error('Error in getBatchesByManufacturer:', error);
-    throw error; // Re-throw to allow caller to handle
+    throw error;
   }
 };
 
-// Fixed function - gets batches filtered by current_holder_wallet
 export const getBatchesByCurrentHolder = async (walletAddress: string) => {
   try {
-    if (!walletAddress?.trim()) {
+    const cleanWallet = cleanString(walletAddress); // Use the cleaning function here
+    if (!cleanWallet) {
       throw new Error('Wallet address is required');
     }
 
-    const cleanWallet = walletAddress.trim();
     console.log(`Fetching batches for current holder wallet: ${cleanWallet}`);
 
     const { data, error } = await supabase
       .from('inventory')
       .select('*')
-      .eq('current_holder_wallet', cleanWallet)
+      .eq('current_holder_wallet', cleanWallet) // Query with the cleaned address
       .order('created_at', { ascending: false });
       
     if (error) {
@@ -158,106 +295,32 @@ export const getBatchesByCurrentHolder = async (walletAddress: string) => {
     return data || [];
   } catch (error) {
     console.error('Error in getBatchesByCurrentHolder:', error);
-    throw error; // Re-throw to allow caller to handle
+    throw error;
   }
 };
 
-// Fixed function - gets batches based on user role and wallet/manufacturer info
 export const getBatchesForUser = async (userRole: string, walletAddress?: string, manufacturerId?: string) => {
-  try {
-    if (!userRole?.trim()) {
-      throw new Error('User role is required');
-    }
-
-    const role = userRole.toLowerCase().trim();
-    console.log(`Fetching batches for user role: ${role}, manufacturerId: ${manufacturerId}, walletAddress: ${walletAddress}`);
-    
-    switch (role) {
-      case 'manufacturer':
-        if (!manufacturerId?.trim()) {
-          throw new Error('Manufacturer ID is required for manufacturer role');
+    try {
+        const role = userRole.toLowerCase().trim();
+        
+        switch (role) {
+            case 'manufacturer':
+                if (!manufacturerId) throw new Error('Manufacturer ID is required');
+                // Manufacturers see all batches they created.
+                return await getBatchesByManufacturer(manufacturerId);
+            
+            case 'distributor':
+            case 'retailer':
+                if (!walletAddress) throw new Error('Wallet address is required');
+                // Distributors/Retailers ONLY see batches they currently hold.
+                return await getBatchesByCurrentHolder(walletAddress);
+            
+            default:
+                console.warn(`Unknown user role: ${role}`);
+                return [];
         }
-        return await getBatchesByManufacturer(manufacturerId);
-      
-      case 'distributor':
-      case 'retailer':
-        if (!walletAddress?.trim()) {
-          throw new Error('Wallet address is required for distributor/retailer role');
-        }
-        return await getBatchesByCurrentHolder(walletAddress);
-      
-      case 'admin':
-        // Admin can see all batches
-        return await getAllBatches();
-      
-      default:
-        console.warn(`Unknown user role: ${role}`);
-        return [];
+    } catch (error) {
+        console.error('Error in getBatchesForUser:', error);
+        throw error;
     }
-  } catch (error) {
-    console.error('Error in getBatchesForUser:', error);
-    throw error; // Re-throw to allow caller to handle
-  }
 };
-
-// Helper function to validate required parameters based on role
-export const validateUserRoleRequirements = (userRole: string, walletAddress?: string, manufacturerId?: string): {
-  valid: boolean;
-  missing?: string;
-} => {
-  const role = userRole.toLowerCase().trim();
-  
-  switch (role) {
-    case 'manufacturer':
-      if (!manufacturerId?.trim()) {
-        return { valid: false, missing: 'manufacturer_id' };
-      }
-      break;
-    
-    case 'distributor':
-    case 'retailer':
-      if (!walletAddress?.trim()) {
-        return { valid: false, missing: 'wallet_address' };
-      }
-      break;
-    
-    case 'admin':
-      // Admin doesn't need specific requirements
-      break;
-    
-    default:
-      return { valid: false, missing: 'valid_role' };
-  }
-  
-  return { valid: true };
-};
-
-// Fixed function - properly named and implemented
-export const getManufacturerBatches = async (manufacturerId: string) => {
-  try {
-    if (!manufacturerId?.trim()) {
-      throw new Error('Manufacturer ID is required');
-    }
-
-    return await getBatchesByManufacturer(manufacturerId);
-  } catch (error) {
-    console.error('Error in getManufacturerBatches:', error);
-    throw error;
-  }
-};
-
-// Fixed function - properly named and implemented with correct column name
-export const getWalletHolderBatches = async (walletAddress: string) => {
-  try {
-    if (!walletAddress?.trim()) {
-      throw new Error('Wallet address is required');
-    }
-
-    return await getBatchesByCurrentHolder(walletAddress);
-  } catch (error) {
-    console.error('Error in getWalletHolderBatches:', error);
-    throw error;
-  }
-};
-
-// ... etc.

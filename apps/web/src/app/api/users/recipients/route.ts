@@ -1,36 +1,21 @@
 // FILE: apps/web/src/app/api/users/recipients/route.ts
 
-import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import { getAuth } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
+import { getPotentialRecipients } from '@/lib/dataservice';
 
-/**
- * API endpoint to fetch a list of potential recipients for a batch transfer.
- * It returns all users with the role of 'distributor' or 'retailer'.
- */
-export async function GET(req: NextRequest) {
-  // Ensure the user making the request is authenticated.
-  const { userId } = getAuth(req);
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
+export async function GET() {
   try {
-    
-    // Query the profiles table for users who are either a distributor or a retailer.
-    const { data: recipients, error } = await supabase
-      .from('profiles')
-      .select('display_name, wallet_address')
-      .in('role', ['distributor', 'retailer']);
-
-    if (error) {
-      console.error('Supabase error fetching recipients:', error);
-      return NextResponse.json({ error: 'Failed to fetch recipients' }, { status: 500 });
+    const { userId } = await auth();
+    if (!userId) {
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 
-    return NextResponse.json(recipients, { status: 200 });
+    const recipients = await getPotentialRecipients(userId);
+    return NextResponse.json(recipients);
   } catch (error) {
-    console.error('Error in /api/users/recipients:', error);
-    return NextResponse.json({ error: 'An unexpected server error occurred' }, { status: 500 });
+    console.error("API Error fetching recipients:", error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    return new NextResponse(JSON.stringify({ error: errorMessage }), { status: 500 });
   }
 }

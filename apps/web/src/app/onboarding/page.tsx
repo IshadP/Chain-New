@@ -15,12 +15,6 @@ import { useToast } from "@/hooks/use-toast";
 
 type Role = "manufacturer" | "distributor" | "retailer";
 
-/**
- * The updated onboarding page.
- * Step 1: User selects their role.
- * Step 2: User connects their wallet.
- * Step 3: User submits to save their profile.
- */
 export default function OnboardingPage() {
   const { user } = useUser();
   const router = useRouter();
@@ -56,7 +50,6 @@ export default function OnboardingPage() {
         description: "Your profile has been saved.",
       });
 
-      // Redirect to the dashboard after successful onboarding
       router.push("/dashboard");
     } catch (error) {
       console.error("Onboarding failed:", error);
@@ -110,7 +103,6 @@ export default function OnboardingPage() {
             </div>
           </div>
           
-          {/* Completion Button */}
           <Button
             onClick={handleCompleteOnboarding}
             disabled={isLoading || !selectedRole || !isConnected}

@@ -1,99 +1,81 @@
 // FILE: apps/web/src/components/BatchCard.tsx
 
-"use client";
+import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { useAccount } from "wagmi";
+import { TransferModal } from "./TransferModal";
+import { ReceiveModal } from  "./ReceiveModal"; 
 
-import { useReadContract } from 'wagmi';
-import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
-import deployment from '../../lib/deployment.json';
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { TransferModal } from '@/components/TransferModal';
-import { RecieveModal } from '@/components/RecieveModal';
-
-// This type represents the basic batch data fetched from Supabase
-interface BatchFromSupabase {
-  batch_id: `0x${string}`; // CHANGED: The ID from Supabase is now a bytes16 hex string
+// Define a more specific type for the batch object
+interface Batch {
+  batch_id: string;
   product_name: string;
+  category: string;
+  cost: number;
+  quantity: number;
+  current_holder_wallet: string | null;
+  intended_recipient_wallet: string | null; // Add this field
+  manufacturer_id: string;
+  [key: string]: any;
 }
 
-// This type represents the structured data from the smart contract
-type BatchOnChain = readonly [
-  `0x${string}`,   // batchId (bytes16)
-  `0x${string}`,   // creator
-  `0x${string}`,   // currentHolder
-  bigint,          // quantity
-  string,          // ewaybillNo
-  bigint,          // cost
-  string,          // internalBatchNo
-  string,          // currentLocation
-  number,          // status (enum index)
-  bigint,          // createdAt
-  bigint           // updatedAt
-];
+interface BatchCardProps {
+  batch: Batch;
+  userRole: string;
+}
 
-// Mapping from the on-chain status enum index to a displayable string
-const statusMapping: readonly string[] = ['Created', 'In Transit', 'Received'];
-const abi = SupplyChainArtifact.abi; // Define ABI for use in the component
+// Helper to format wallet addresses for display
+const formatAddress = (address: string | null) => {
+    if (!address) return "N/A";
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
 
-export function BatchCard({ batch, userRole }: { batch: BatchFromSupabase, userRole: string }) {
-  // Wagmi hook to read live data from the smart contract
-  const { data: productOnChain, isLoading, error } = useReadContract({
-    address: deployment.address as `0x${string}`,
-    abi: abi,
-    functionName: 'getBatch',
-    // CHANGED: Pass the batch_id directly as a bytes16 hex string. No BigInt conversion.
-    args: [batch.batch_id], 
-  });
+export function BatchCard({ batch, userRole }: BatchCardProps) {
+  const { address: connectedWallet, isConnected } = useAccount();
 
+  const isHolder = isConnected && batch.current_holder_wallet?.toLowerCase() === connectedWallet?.toLowerCase();
+  const isRecipient = isConnected && batch.intended_recipient_wallet?.toLowerCase() === connectedWallet?.toLowerCase();
 
-  if (error) {
-      console.error(`Error fetching on-chain data for batch ${batch.batch_id}:`, error);
+  const getStatus = (): { text: string; color: "default" | "secondary" | "destructive" | "outline" } => {
+    if (isRecipient) {
+        return { text: "Pending Receipt", color: "secondary" };
+    }
+    if (batch.intended_recipient_wallet) {
+        return { text: "In Transit", color: "outline" };
+    }
+    if (batch.current_holder_wallet) {
+        return { text: "In Stock", color: "default" };
+    }
+    return { text: "Unknown", color: "destructive" };
   }
 
-  // Safely extract and format data from the on-chain query result
-  const onChainData = productOnChain as BatchOnChain | undefined;
-  const displayOwner = onChainData?.[2] ?? '0x...';
-  const displayStatus = onChainData?.[8] !== undefined ? statusMapping[onChainData[8]] : '...';
-  const displayQuantity = onChainData?.[3]?.toString() ?? '...';
+  const status = getStatus();
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{batch.product_name}</CardTitle>
-        <p className="text-xs text-gray-500 break-all">Batch ID: {batch.batch_id}</p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="flex justify-between items-start">
             <div>
-                <h4 className="font-semibold">Quantity:</h4>
-                {isLoading ? <Skeleton className="h-4 w-16" /> : <p>{displayQuantity} units</p>}
+                <CardTitle>{batch.product_name}</CardTitle>
+                <CardDescription className="font-mono text-xs pt-1">{batch.batch_id}</CardDescription>
             </div>
-             <div>
-                <h4 className="font-semibold">Status:</h4>
-                {isLoading ? <Skeleton className="h-6 w-20" /> : <Badge variant="secondary">{displayStatus}</Badge>}
-            </div>
+            <Badge variant={status.color}>{status.text}</Badge>
         </div>
-
-        <div>
-          <h4 className="text-sm font-semibold">Current Holder:</h4>
-          {isLoading ? (
-            <Skeleton className="h-4 w-full" />
-          ) : (
-            <p className="text-sm text-gray-700 truncate" title={displayOwner}>{displayOwner}</p>
-          )}
-        </div>
-        
-        <div className="flex gap-2 pt-2">
-          {/* Action buttons are now correctly enabled/disabled based on role */}
-          {(userRole === 'manufacturer' || userRole === 'distributor') && (
-            <TransferModal batchId={batch.batch_id} />
-          )}
-          {(userRole === 'distributor' || userRole === 'retailer') && (
-            <RecieveModal batchId={batch.batch_id} />
-          )}
-        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <p><strong>Category:</strong> {batch.categories}</p>
+        <p><strong>Cost per item:</strong> ${batch.cost}</p>
+        <p className="font-mono text-xs">
+            <strong>Holder:</strong> {formatAddress(batch.current_holder_wallet)}
+        </p>
+         <p className="font-mono text-xs">
+            <strong>Recipient:</strong> {formatAddress(batch.intended_recipient_wallet)}
+        </p>
       </CardContent>
+      <CardFooter>
+        {isHolder && <TransferModal batchId={batch.batch_id} />}
+        {isRecipient && <ReceiveModal batchId={batch.batch_id} />}
+      </CardFooter>
     </Card>
   );
 }
