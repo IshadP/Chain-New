@@ -2,11 +2,11 @@ const { ethers } = require("hardhat");
 const fs = require("fs");
 const path = require("path");
 
-// Utility to map the Status enum (0=Created, 1=InTransit, 2=Received) to readable strings
-const STATUS_MAP = ["Created", "InTransit", "Received"]; 
+// Utility to map the Status enum (0, 1, 2) to readable strings
+const STATUS_MAP = ["Created", "InTransit", "Received"];
 
 async function main() {
-  // Use the local deployment file path, assuming the script is in 'apps/contracts/scripts'
+  // Resolve the path to the deployment file relative to where this script is located
   const deploymentPath = path.resolve(
     __dirname, 
     "../deployments/latest.json"
@@ -21,16 +21,38 @@ async function main() {
   const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
   const contractAddress = deployment.contractAddress;
 
+  // Get signers to check their roles (Hardhat's default accounts)
+  const [manufacturer, distributor, retailer] = await ethers.getSigners();
   const SupplyChain = await ethers.getContractFactory("SupplyChain");
   const supplyChain = SupplyChain.attach(contractAddress);
 
   console.log("=========================================");
-  console.log("🔗 Supply Chain Data Viewer (Batch Focus)");
+  console.log("🔗 Supply Chain Data Viewer");
   console.log(`Contract Address: ${contractAddress}`);
   console.log(`Network: ${deployment.network} (Chain ID: ${deployment.chainId})`);
   console.log("=========================================");
   
-  // --- Role check section removed to avoid confusion with Metamask addresses ---
+  // --- 1. Fetch Role Information ---
+  console.log("\n👤 Role Information:");
+  const addressesToCheck = [
+    { name: "Deployer (Manufacturer)", address: manufacturer.address },
+    { name: "Distributor", address: distributor.address },
+    { name: "Retailer", address: retailer.address },
+  ];
+  
+  for (const { name, address } of addressesToCheck) {
+    const isM = await supplyChain.isManufacturer(address); // Check Manufacturer role
+    const isD = await supplyChain.isDistributor(address); // Check Distributor role
+    const isR = await supplyChain.isRetailer(address);     // Check Retailer role
+    
+    const roles = [];
+    if (isM) roles.push("Manufacturer");
+    if (isD) roles.push("Distributor");
+    if (isR) roles.push("Retailer");
+    
+    console.log(`- ${name} (${address}): ${roles.join(', ') || 'No Role'}`);
+  }
+
 
   // --- 2. Fetch All Batches by Event ---
   console.log("\n📦 All Batches (Fetched via 'BatchCreated' events):");
@@ -44,12 +66,12 @@ async function main() {
     const batchIds = events.map(event => event.args.batchId);
     
     if (batchIds.length === 0) {
-      console.log("No batches found. Run the corrected 'seed.js' or create a batch via Metamask.");
+      console.log("No batches found. Ensure your 'createBatch' transactions were successful.");
     } else {
-      console.log(`Found ${batchIds.length} batches:`);
+      console.log(`Found ${batchIds.length} batches.`);
       
       for (const batchId of batchIds) {
-        // Call the view function to get full batch details 
+        // Call the view function to get full batch details
         const batch = await supplyChain.getBatch(batchId);
         
         console.log("-----------------------------------------");
@@ -60,15 +82,15 @@ async function main() {
         console.log(`E-way Bill:    ${batch.ewaybillNo}`);
         console.log(`Cost:          ${batch.cost.toString()}`);
         console.log(`Location:      ${batch.currentLocation}`);
+        // Convert the numeric status (0, 1, 2) to a readable string
         console.log(`Status:        ${STATUS_MAP[batch.status]}`); 
         console.log(`Created At:    ${new Date(Number(batch.createdAt) * 1000).toLocaleString()}`);
-        console.log(`Updated At:    ${new Date(Number(batch.updatedAt) * 1000).toLocaleString()}`);
       }
       console.log("-----------------------------------------");
     }
 
   } catch (error) {
-    console.error("\n❌ Error fetching batch data. This might be due to a contract revert on 'getBatch'.");
+    console.error("\n❌ Error fetching batch data. This might be due to a faulty batch ID or a contract revert (e.g., a batch ID was logged but a subsequent state change made the batch invalid).");
     console.error("Detailed Error:", error.message);
   }
 

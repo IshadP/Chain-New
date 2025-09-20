@@ -1,7 +1,7 @@
 // FILE: apps/web/src/app/api/users/recipients/route.ts
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { getAuth } from '@clerk/nextjs/server';
 
 /**
@@ -16,7 +16,6 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const supabase = getSupabase();
     
     // Query the profiles table for users who are either a distributor or a retailer.
     const { data: recipients, error } = await supabase
