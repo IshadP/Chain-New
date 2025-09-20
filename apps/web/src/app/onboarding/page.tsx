@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConnectWallet } from "@/components/ConnectWallet";
 import { useToast } from "@/hooks/use-toast";
 
-type Role = "distributor" | "retailer";
+type Role = "manufacturer" | "distributor" | "retailer";
 
 /**
  * The updated onboarding page.
@@ -90,6 +90,9 @@ export default function OnboardingPage() {
               onValueChange={handleRoleSelection}
               className="w-full"
             >
+              <ToggleGroupItem value="manufacturer" className="flex-1">
+                Manufacturer
+              </ToggleGroupItem>
               <ToggleGroupItem value="distributor" className="flex-1">
                 Distributor
               </ToggleGroupItem>

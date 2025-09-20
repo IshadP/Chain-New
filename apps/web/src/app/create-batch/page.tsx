@@ -156,7 +156,7 @@ export default function CreateBatchPage() {
         const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/track/${state.batchId}`);
         setState(prev => ({ ...prev, qrCodeUrl: qrDataUrl }));
         toast({ title: 'Batch Created Successfully!', description: `Batch ID: ${state.batchId}` });
-      
+        console.log(state.batchId);
         await saveOffChainData(state.batchId, form.getValues());
       };
       generateQrAndSave();
