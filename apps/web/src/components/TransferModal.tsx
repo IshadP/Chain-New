@@ -26,7 +26,7 @@ interface Recipient {
   display_name: string | null;
   wallet_address: string;
 }
-SupplyChainABI = SupplyChainArtifact.abi;
+const SupplyChainABI = SupplyChainArtifact.abi;
 /**
  * This updated TransferModal fetches a live list of potential recipients
  * from the database instead of using mock data.

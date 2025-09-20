@@ -38,8 +38,8 @@
       ]
     },
     "G:\\dev\\New Chain\\Chain\\apps\\contracts\\contracts\\SupplyChain.sol": {
-      "lastModificationDate": 1758130012836,
-      "contentHash": "a79fabebdd45c3e81545879a1164da61",
+      "lastModificationDate": 1758215278437,
+      "contentHash": "3af84547f0d05515c5214d86f79c8370",
       "sourceName": "contracts/SupplyChain.sol",
       "solcConfig": {
         "version": "0.8.24",

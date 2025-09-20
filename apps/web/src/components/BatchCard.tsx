@@ -3,80 +3,92 @@
 "use client";
 
 import { useReadContract } from 'wagmi';
-import { SupplyChainABI } from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
+import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../lib/deployment.json';
-import { Badge } from '@/components/ui/badge'; // Using ShadCN Badge
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Using ShadCN Card
-import { Skeleton } from '@/components/ui/skeleton'; // Using ShadCN Skeleton for loading
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { TransferModal } from '@/components/TransferModal';
 import { RecieveModal } from '@/components/RecieveModal';
 
 // This type represents the basic batch data fetched from Supabase
 interface BatchFromSupabase {
-  batch_id: string; // The numeric ID from the contract, stored as a string/numeric in Supabase
+  batch_id: `0x${string}`; // CHANGED: The ID from Supabase is now a bytes16 hex string
   product_name: string;
 }
 
-// This type represents the structured data returned from our smart contract's `getBatch` function
+// This type represents the structured data from the smart contract
 type BatchOnChain = readonly [
-  bigint, // batchId
-  `0x${string}`, // creator
-  `0x${string}`, // currentHolder
-  bigint, // quantity
-  string, // ewaybillNo
-  number, // status (enum index)
-  bigint, // createdAt
-  bigint // updatedAt
+  `0x${string}`,   // batchId (bytes16)
+  `0x${string}`,   // creator
+  `0x${string}`,   // currentHolder
+  bigint,          // quantity
+  string,          // ewaybillNo
+  bigint,          // cost
+  string,          // internalBatchNo
+  string,          // currentLocation
+  number,          // status (enum index)
+  bigint,          // createdAt
+  bigint           // updatedAt
 ];
 
 // Mapping from the on-chain status enum index to a displayable string
 const statusMapping: readonly string[] = ['Created', 'In Transit', 'Received'];
+const abi = SupplyChainArtifact.abi; // Define ABI for use in the component
 
 export function BatchCard({ batch, userRole }: { batch: BatchFromSupabase, userRole: string }) {
-  // Wagmi hook to read live data from the smart contract for this specific batch
-  const { data: productOnChain, isLoading } = useReadContract({
+  // Wagmi hook to read live data from the smart contract
+  const { data: productOnChain, isLoading, error } = useReadContract({
     address: deployment.address as `0x${string}`,
-    abi: SupplyChainABI,
+    abi: abi,
     functionName: 'getBatch',
-    args: [BigInt(batch.batch_id)], // The smart contract expects a BigInt for the ID
+    // CHANGED: Pass the batch_id directly as a bytes16 hex string. No BigInt conversion.
+    args: [batch.batch_id], 
   });
+
+
+  if (error) {
+      console.error(`Error fetching on-chain data for batch ${batch.batch_id}:`, error);
+  }
 
   // Safely extract and format data from the on-chain query result
   const onChainData = productOnChain as BatchOnChain | undefined;
   const displayOwner = onChainData?.[2] ?? '0x...';
-  const displayStatus = onChainData?.[5] !== undefined ? statusMapping[onChainData[5]] : '...';
+  const displayStatus = onChainData?.[8] !== undefined ? statusMapping[onChainData[8]] : '...';
+  const displayQuantity = onChainData?.[3]?.toString() ?? '...';
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>{batch.product_name}</CardTitle>
-        <p className="text-sm text-gray-500">Batch ID: {batch.batch_id}</p>
+        <p className="text-xs text-gray-500 break-all">Batch ID: {batch.batch_id}</p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+                <h4 className="font-semibold">Quantity:</h4>
+                {isLoading ? <Skeleton className="h-4 w-16" /> : <p>{displayQuantity} units</p>}
+            </div>
+             <div>
+                <h4 className="font-semibold">Status:</h4>
+                {isLoading ? <Skeleton className="h-6 w-20" /> : <Badge variant="secondary">{displayStatus}</Badge>}
+            </div>
+        </div>
+
         <div>
           <h4 className="text-sm font-semibold">Current Holder:</h4>
           {isLoading ? (
-            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-4 w-full" />
           ) : (
             <p className="text-sm text-gray-700 truncate" title={displayOwner}>{displayOwner}</p>
           )}
         </div>
-
-        <div>
-          <h4 className="text-sm font-semibold">Status:</h4>
-          {isLoading ? (
-            <Skeleton className="h-6 w-20 rounded-full" />
-          ) : (
-            <Badge variant="secondary">{displayStatus}</Badge>
-          )}
-        </div>
         
         <div className="flex gap-2 pt-2">
-          {/* Only show transfer button if the user has the correct role */}
+          {/* Action buttons are now correctly enabled/disabled based on role */}
           {(userRole === 'manufacturer' || userRole === 'distributor') && (
             <TransferModal batchId={batch.batch_id} />
           )}
-          {/* Only show receive button if the user has the correct role */}
           {(userRole === 'distributor' || userRole === 'retailer') && (
             <RecieveModal batchId={batch.batch_id} />
           )}

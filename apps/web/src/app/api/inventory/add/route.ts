@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Validate required fields
-    const requiredFields = ['batch_id', 'product_name', 'quantity', 'current_holder_wallet', 'eway_bill_no'];
+    const requiredFields = ['batch_id', 'product_name', 'category', 'current_holder_wallet', 'eway_bill_no', 'cost', 'created_at'];
     const missingFields = requiredFields.filter(field => !itemData[field]);
     
     if (missingFields.length > 0) {

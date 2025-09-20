@@ -18,7 +18,7 @@ export async function updateUserRoleAndProfile({
   role,
   walletAddress,
 }: {
-  role: "distributor" | "retailer";
+  role: "manufacturer" |"distributor" | "retailer";
   walletAddress: string;
 }) {
   const { userId } = await auth();

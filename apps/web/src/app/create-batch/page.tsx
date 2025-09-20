@@ -1,534 +1,293 @@
 // FILE: apps/web/src/app/create-batch/page.tsx
 
-"use client";
+'use client'
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useEffect } from 'react';
+import { useUser, useAuth } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
+import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
+import { v4 as uuidv4 } from 'uuid';
+import QRCode from 'qrcode';
+import Image from 'next/image';
+
+// FORM LIBRARIES
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+// UI Components & Icons
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
-import SupplyChainArtifact from '../../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
-import deployment from '@/lib/deployment.json';
-import { useRouter } from "next/navigation";
+import { Alert } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@clerk/nextjs";
-import { decodeEventLog } from 'viem';
+import { Package, QrCode, AlertCircle } from 'lucide-react';
 
-// --- Types for manual state management ---
-interface CreateBatchForm {
-  productName: string;
-  quantity: number | ''; 
-  ewaybillNo: string;
-  description: string;
-  cost: number | '';
-  currentLocation: string;
-  internalBatchNo: string;
+// Contract & Deployment
+import SupplyChainArtifact from '../../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
+import deployment from '../../../lib/deployment.json';
+
+// --- ZOD VALIDATION SCHEMA ---
+const formSchema = z.object({
+  productName: z.string().min(1, 'Product name is required'),
+  cost: z.coerce.number().positive('Cost must be a positive number'),
+  category: z.string().min(1, 'Category is required'),
+  description: z.string().optional(),
+  internalBatchNo: z.string().min(1, 'Internal batch name is required'),
+  quantity: z.coerce.number().int(),
+  currentLocation: z.string().min(1, 'Manufacturing location is required'),
+  ewaybillNo: z.string().min(1, 'E-way bill is required'),
+});
+
+// Infer the TypeScript type from the schema
+type FormData = z.infer<typeof formSchema>;
+
+// --- TYPES & CONSTANTS ---
+interface BatchCreationState {
+  qrCodeUrl: string;
+  batchId: `0x${string}` | null;
 }
-
-// Type for validation errors
-interface CreateBatchErrors {
-  productName?: string;
-  quantity?: string;
-  ewaybillNo?: string;
-  description?: string;
-  cost?: string;
-  form?: string;
-  currentLocation: string;
-  internalBatchNo: string;
-}
-
+const categories = ['Electronics', 'Clothing', 'Food & Beverages', 'Home & Garden', 'Health & Beauty', 'Sports & Outdoors', 'Books & Media', 'Automotive', 'Industrial', 'Other'];
 const abi = SupplyChainArtifact.abi;
 const contractAddress = deployment.address as `0x${string}`;
 
-/**
- * **IMPROVED LOG DECODING FUNCTION using viem**
- * Extracts the on-chain batchId from the transaction receipt logs.
- */
-function extractBatchIdFromReceipt(receipt: any): string | undefined {
-  if (!receipt || !receipt.logs || receipt.logs.length === 0) return undefined;
-
-  try {
-    // Find the BatchCreated event in the logs
-    for (const log of receipt.logs) {
-      if (log.address.toLowerCase() === contractAddress.toLowerCase()) {
-        try {
-          // Decode the log using viem
-          const decoded = decodeEventLog({
-            abi: abi,
-            data: log.data,
-            topics: log.topics,
-          });
-
-          // Check if this is the BatchCreated event
-          if (decoded.eventName === 'BatchCreated') {
-            const batchId = (decoded.args as any).batchId;
-            return batchId.toString();
-          }
-        } catch (decodeError) {
-          console.warn('Failed to decode log:', decodeError);
-          continue;
-        }
-      }
-    }
-
-    // Fallback to manual decoding if viem fails
-    const targetLog = receipt.logs.find((log: any) => 
-      log.address.toLowerCase() === contractAddress.toLowerCase()
-    );
-
-    if (targetLog && targetLog.data && targetLog.data.length > 2) {
-      const data = targetLog.data;
-      const batchIdHex = data.substring(0, 66); // First 32 bytes
-      const batchId = BigInt(batchIdHex).toString();
-      return batchId;
-    }
-  } catch (error) {
-    console.error("Error extracting batch ID from receipt:", error);
-  }
-
-  return undefined;
+function uuidToBytes16(uuid: string): `0x${string}` {
+  console.log(uuid.replace(/-/g, ''))
+  return `0x${uuid.replace(/-/g, '')}`;
 }
 
-/**
- * Generate QR code for the batch
- */
-async function generateQRForBatch(batchId: string): Promise<void> {
-  try {
-    const response = await fetch('/api/qr/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ batchId }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to generate QR code');
-    }
-
-    const qrData = await response.json();
-    console.log('QR code generated successfully:', qrData);
-  } catch (error) {
-    console.error('Error generating QR code:', error);
-    throw error;
-  }
-}
-
+// --- COMPONENT ---
 export default function CreateBatchPage() {
-  const router = useRouter();
-  const { toast } = useToast();
   const { userId } = useAuth();
+  const { user } = useUser();
+  const { toast } = useToast();
   const { address: actorAddress, isConnected } = useAccount();
-  const { data: hash, writeContract, isPending: isWalletPending, error: writeError } = useWriteContract();
+  const userRole = user?.publicMetadata?.role as string;
 
-  // State for form data and errors
-  const [formData, setFormData] = useState<CreateBatchForm>({
-    productName: '',
-    quantity: '',
-    ewaybillNo: '',
-    description: '',
-    cost: '',
-    currentLocation: '',
-    internalBatchNo: '',
+  const { data: hash, writeContract, isPending: isWalletPending, reset } = useWriteContract();
+  const { isSuccess: isConfirmed, isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
+
+  const [state, setState] = useState<BatchCreationState>({
+    qrCodeUrl: '',
+    batchId: null,
   });
 
-  const [errors, setErrors] = useState<CreateBatchErrors>({});
-  
-  const { 
-    data: receipt, 
-    isLoading: isConfirming, 
-    isSuccess: isConfirmed,
-    error: receiptError 
-  } = useWaitForTransactionReceipt({ 
-    hash,
-    confirmations: 1 // Wait for at least 1 confirmation
+  // --- REACT HOOK FORM SETUP ---
+  const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      productName: '',
+      cost: undefined,
+      category: '',
+      description: '',
+      internalBatchNo: '',
+      quantity: undefined,
+      currentLocation: '',
+      ewaybillNo: '',
+    },
   });
+  const { register, handleSubmit, control, formState: { errors } } = form;
 
-  // Handle write contract errors
-  useEffect(() => {
-    if (writeError) {
-      console.error('Write contract error:', writeError);
-      toast({
-        title: "Transaction Failed",
-        description: `Failed to send transaction: ${writeError.message}`,
-        variant: "destructive"
-      });
-    }
-  }, [writeError, toast]);
-
-  // Handle receipt errors
-  useEffect(() => {
-    if (receiptError) {
-      console.error('Receipt error:', receiptError);
-      toast({
-        title: "Transaction Error",
-        description: `Transaction failed: ${receiptError.message}`,
-        variant: "destructive"
-      });
-    }
-  }, [receiptError, toast]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const { id, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      // Convert to Number only if value is not empty, otherwise keep it ''
-      [id]: (id === 'quantity' || id === 'cost') ? (value === '' ? '' : Number(value)) : value,
-    }));
-    if (errors[id as keyof CreateBatchErrors]) {
-      setErrors(prev => ({ ...prev, [id]: undefined }));
-    }
-  };
-  
-  // Manual Validation Logic
-  const validateForm = (data: CreateBatchForm) => {
-    const newErrors: CreateBatchErrors = {};
-    const quantity = data.quantity as number;
-    const cost = data.cost as number;
-
-    if (!data.productName.trim()) newErrors.productName = 'Product name is required';
-    
-    // Check if it's not a number OR if it's a number but not positive
-    if (typeof data.quantity !== 'number' || isNaN(quantity) || quantity <= 0) {
-      newErrors.quantity = 'Quantity must be a positive number';
-    }
-    
-    if (!data.ewaybillNo.trim()) newErrors.ewaybillNo = 'E-way bill number is required';
-    
-    // Cost is optional, only validate if it's present and numeric
-    if (data.cost !== '' && (typeof data.cost !== 'number' || isNaN(cost) || cost <= 0)) {
-      newErrors.cost = 'Cost must be a positive number or empty';
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  // Callback to save off-chain data to the database
-  const saveOffChainData = useCallback(async (onChainBatchId: string, offChainData: CreateBatchForm) => {
-    if (!userId || !actorAddress) {
-      throw new Error('User not authenticated or wallet not connected');
-    }
-
+  // --- DATA HANDLING ---
+  const saveOffChainData = async (batchId: `0x${string}`, data: FormData) => {
+    // This function remains largely the same, but now receives validated data
     try {
-      const requestBody = {
-        batch_id: onChainBatchId,
-        product_name: offChainData.productName.trim(),
-        quantity: offChainData.quantity as number,
-        eway_bill_no: offChainData.ewaybillNo.trim(),
-        description: offChainData.description.trim() || null,
-        cost: (typeof offChainData.cost === 'number' && offChainData.cost > 0) ? offChainData.cost : null,
-        manufacturer_id: userId,
-        current_holder_wallet: actorAddress,
-      };
-
-      console.log('Sending request body to API:', requestBody);
-
       const response = await fetch('/api/inventory/add', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batch_id: batchId,
+          product_name: data.productName,
+          cost: data.cost,
+          description: data.description,
+          category: data.category,
+          internal_batch_no: data.internalBatchNo,
+          eway_bill_no: data.ewaybillNo,
+          created_at: new Date().toISOString(),
+          manufacturer_id: userId,
+          current_holder_wallet: actorAddress,
+        }),
       });
-
-      const responseData = await response.json();
-
-      if (!response.ok) {
-        console.error('API Error Response:', responseData);
-        throw new Error(responseData.error || `HTTP ${response.status}: Failed to save off-chain data.`);
-      }
-
-      console.log('Successfully saved to database:', responseData);
-      toast({ 
-        title: "Database Success!", 
-        description: "Batch details saved to Supabase.",
-        variant: "default"
-      });
-
-      // Generate QR code after successful database save
-      try {
-        await generateQRForBatch(onChainBatchId);
-        toast({ 
-          title: "QR Code Generated!", 
-          description: "QR code created for batch tracking.",
-          variant: "default"
-        });
-      } catch (qrError) {
-        console.error('QR generation failed:', qrError);
-        toast({
-          title: "QR Generation Warning",
-          description: "Batch created successfully but QR code generation failed.",
-          variant: "default"
-        });
-      }
-
-      // Navigate to dashboard after success
-      setTimeout(() => {
-        router.push('/dashboard');
-      }, 2000);
-
-    } catch (err) {
-      console.error("Error saving off-chain data:", err);
-      const errorMessage = err instanceof Error ? err.message : "An unknown error occurred.";
-      toast({
-        title: "Database Error",
-        description: `Failed to save batch to Supabase: ${errorMessage}`,
-        variant: "destructive"
-      });
-      throw err; // Re-throw to handle in confirmation callback
-    }
-  }, [userId, actorAddress, router, toast]);
-
-  // Callback to handle transaction confirmation
-  const handleConfirmation = useCallback(async (txReceipt: any) => {
-    if (!actorAddress || !userId) {
-      toast({
-        title: "Authentication Error",
-        description: "User authentication or wallet connection lost.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    console.log('Transaction receipt:', txReceipt);
-
-    const onChainBatchId = extractBatchIdFromReceipt(txReceipt);
-
-    if (onChainBatchId) {
-      toast({ 
-        title: "On-Chain Success!", 
-        description: `Batch ${onChainBatchId} created successfully on blockchain.`,
-        variant: "default"
-      });
-      
-      try {
-        await saveOffChainData(onChainBatchId, formData as CreateBatchForm);
-      } catch (saveError) {
-        console.error('Failed to save off-chain data:', saveError);
-        // Error already handled in saveOffChainData
-      }
-    } else {
-      console.error("Could not find BatchCreated event in transaction logs.", txReceipt.logs);
-      toast({
-        title: "Parsing Error",
-        description: "Could not extract batch ID from transaction. Database not updated.",
-        variant: "destructive"
-      });
-    }
-  }, [toast, saveOffChainData, userId, actorAddress, formData]);
-
-  // The useEffect hook to watch for a confirmed transaction
-  useEffect(() => {
-    if (isConfirmed && receipt) {
-      console.log('Transaction confirmed, handling confirmation...');
-      handleConfirmation(receipt);
-    }
-  }, [isConfirmed, receipt, handleConfirmation]);
-
-  // Manual Submission Handler
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    console.log('Form submitted with data:', formData);
-
-    // 🛡️ CRITICAL CHECK 1: Ensure wallet is connected
-    if (!isConnected || !actorAddress) {
-      toast({ 
-        title: "Connection Error", 
-        description: "Please connect your wallet before creating a batch.", 
-        variant: "destructive" 
-      });
-      return;
-    }
-    
-    // 🛡️ CRITICAL CHECK 2: Ensure user is authenticated (Clerk)
-    if (!userId) {
-      toast({ 
-        title: "Authentication Required", 
-        description: "You must be logged in to create a batch.", 
-        variant: "destructive" 
-      });
-      return;
-    }
-
-    // 🛡️ CRITICAL CHECK 3: Form validation
-    if (!validateForm(formData as CreateBatchForm)) {
-      toast({
-        title: "Validation Error",
-        description: "Please correct the errors in the form.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    try {
-      console.log('Initiating blockchain transaction...');
-      console.log('Contract address:', contractAddress);
-      console.log('Quantity:', formData.quantity);
-      console.log('E-way Bill:', formData.ewaybillNo);
-
-      // Validation passed, initiate transaction
-      await writeContract({
-        address: contractAddress,
-        abi: abi,
-        functionName: 'createBatch',
-        args: [BigInt(formData.quantity as number), formData.ewaybillNo.trim(), BigInt(formData.cost), formData.internalBatchNo.trim(), formData.currentLocation.trim()],
-      });
-
-      console.log('Transaction initiated successfully');
+      if (!response.ok) throw new Error((await response.json()).error || 'Failed to save');
+      toast({ title: 'Database Success!', description: 'Batch details saved.' });
     } catch (error) {
-      console.error('Error initiating transaction:', error);
       toast({
-        title: "Transaction Error",
-        description: `Failed to initiate transaction: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        variant: "destructive"
+        title: "Database Save Failed",
+        description: `CRITICAL: The batch is on-chain, but saving failed. Batch ID: ${batchId}. Error: ${error instanceof Error ? error.message : 'Unknown'}`,
+        variant: "destructive",
+        duration: 15000,
       });
     }
   };
 
-  const isProcessing = isWalletPending || isConfirming;
+  const onFormSubmit = (data: FormData) => {
+    if (!isConnected || !userId || userRole?.toLowerCase() !== 'manufacturer') {
+      toast({ title: 'Access Denied', description: 'Connect wallet and ensure you have the manufacturer role.', variant: 'destructive' });
+      return;
+    }
+
+    const newUuid = uuidv4();
+    const batchIdAsBytes16 = uuidToBytes16(newUuid);
+    console.log(batchIdAsBytes16);
+    setState(prev => ({ ...prev, batchId: batchIdAsBytes16 }));
+
+    writeContract({
+      address: contractAddress,
+      abi: abi,
+      functionName: 'createBatch',
+      args: [
+        batchIdAsBytes16,
+        BigInt(data.quantity),
+        data.ewaybillNo,
+        BigInt(data.cost * 100), // Store cost in cents
+        data.internalBatchNo,
+        data.currentLocation,
+      ],
+    });
+  };
+
+  // --- USE EFFECT FOR TRANSACTION CONFIRMATION ---
+  useEffect(() => {
+    if (isConfirmed && state.batchId) {
+      const generateQrAndSave = async () => {
+        const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/track/${state.batchId}`);
+        setState(prev => ({ ...prev, qrCodeUrl: qrDataUrl }));
+        toast({ title: 'Batch Created Successfully!', description: `Batch ID: ${state.batchId}` });
+      
+        await saveOffChainData(state.batchId, form.getValues());
+      };
+      generateQrAndSave();
+    }
+  }, [isConfirmed, state.batchId]);
+
+  // --- UI & RENDER ---
+  if (userRole?.toLowerCase() !== 'manufacturer') {
+    // Access denied view
+    return (
+      <div className="container mx-auto p-8 text-center">
+        <Alert variant="destructive"><AlertCircle className="h-4 w-4" />Access Denied</Alert>
+      </div>
+    );
+  }
+  
+  const isLoading = isWalletPending || isConfirming;
+  const isCreated = isConfirmed && !!state.qrCodeUrl;
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
-      <Card className="w-full max-w-2xl">
-        <CardHeader>
-          <CardTitle className="text-3xl">Create New Product Batch</CardTitle>
-          <CardDescription>
-            Fill in the details below to register a new batch on the blockchain and in the database.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Product Name */}
-              <div className="space-y-2">
-                <Label htmlFor="productName">Product Name</Label>
-                <Input 
-                  id="productName" 
-                  placeholder="e.g., Organic Apples" 
-                  value={formData.productName} 
-                  onChange={handleChange}
-                  disabled={isProcessing}
-                />
-                {errors.productName && <p className="text-sm text-red-500">{errors.productName}</p>}
-              </div>
+    <div className="container mx-auto p-4 sm:p-8">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center space-x-3 mb-8">
+          <Package className="h-8 w-8 text-blue-600" />
+          <div>
+            <h1 className="text-3xl font-bold">Create New Product Batch</h1>
+            <p className="text-gray-600">Register a new batch on-chain and off-chain.</p>
+          </div>
+        </div>
 
-              {/* Quantity */}
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantity</Label>
-                <Input 
-                  id="quantity" 
-                  type="number" 
-                  placeholder="e.g., 500" 
-                  value={formData.quantity} 
-                  onChange={handleChange}
-                  disabled={isProcessing}
-                  min="1"
-                  step="1"
-                />
-                {errors.quantity && <p className="text-sm text-red-500">{errors.quantity}</p>}
-              </div>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <Card>
+            <CardHeader><CardTitle>Batch Details</CardTitle></CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-6">
+                {/* Product Info (Off-Chain) */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Product Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="productName">Product Name *</Label>
+                      <Input id="productName" {...register("productName")} disabled={isCreated} className={errors.productName ? 'border-red-500' : ''}/>
+                      {errors.productName && <p className="text-sm text-red-500 mt-1">{errors.productName.message}</p>}
+                    </div>
+                    <div>
+                      <Label htmlFor="cost">Cost (per item) *</Label>
+                      <Input id="cost" type="number" step="0.01" {...register("cost")} disabled={isCreated} className={errors.cost ? 'border-red-500' : ''}/>
+                      {errors.cost && <p className="text-sm text-red-500 mt-1">{errors.cost.message}</p>}
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="category">Category *</Label>
+                    <Controller
+                      control={control}
+                      name="category"
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value} disabled={isCreated}>
+                          <SelectTrigger className={errors.category ? 'border-red-500' : ''}><SelectValue placeholder="Select a category" /></SelectTrigger>
+                          <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {errors.category && <p className="text-sm text-red-500 mt-1">{errors.category.message}</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="description">Description</Label>
+                    <Textarea id="description" {...register("description")} disabled={isCreated}/>
+                  </div>
+                </div>
 
-            {/* E-way Bill Number */}
-            <div className="space-y-2">
-              <Label htmlFor="ewaybillNo">E-way Bill Number</Label>
-              <Input 
-                id="ewaybillNo" 
-                placeholder="e.g., EWB1234567890" 
-                value={formData.ewaybillNo} 
-                onChange={handleChange}
-                disabled={isProcessing}
-              />
-              {errors.ewaybillNo && <p className="text-sm text-red-500">{errors.ewaybillNo}</p>}
-            </div>
+                {/* Batch Details (On-Chain) */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-medium">Batch Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="quantity">Quantity *</Label>
+                      <Input id="quantity" type="number" {...register("quantity")} disabled={isCreated} className={errors.quantity ? 'border-red-500' : ''}/>
+                      {errors.quantity && <p className="text-sm text-red-500 mt-1">{errors.quantity.message}</p>}
+                    </div>
+                    <div>
+                      <Label htmlFor="internalBatchNo">Internal Batch No. *</Label>
+                      <Input id="internalBatchNo" {...register("internalBatchNo")} disabled={isCreated} className={errors.internalBatchNo ? 'border-red-500' : ''}/>
+                      {errors.internalBatchNo && <p className="text-sm text-red-500 mt-1">{errors.internalBatchNo.message}</p>}
+                    </div>
+                  </div>
+                   <div>
+                      <Label htmlFor="ewaybillNo">E-Way Bill Number *</Label>
+                      <Input id="ewaybillNo" {...register("ewaybillNo")} disabled={isCreated} className={errors.ewaybillNo ? 'border-red-500' : ''}/>
+                      {errors.ewaybillNo && <p className="text-sm text-red-500 mt-1">{errors.ewaybillNo.message}</p>}
+                    </div>
+                     <div>
+                      <Label htmlFor="currentLocation">Manufacturing Location *</Label>
+                      <Input id="currentLocation" {...register("currentLocation")} disabled={isCreated} className={errors.currentLocation ? 'border-red-500' : ''}/>
+                      {errors.currentLocation && <p className="text-sm text-red-500 mt-1">{errors.currentLocation.message}</p>}
+                    </div>
+                </div>
 
-            {/* E-way Bill Number */}
-            <div className="space-y-2">
-              <Label htmlFor="InternalBatchNo">Internal Batch No.</Label>
-              <Input 
-                id="internalbatchNo." 
-                placeholder="e.g., EWB1234567890" 
-                value={formData.internalBatchNo} 
-                onChange={handleChange}
-                disabled={isProcessing}
-              />
-              {errors.internalBatchNo && <p className="text-sm text-red-500">{errors.internalBatchNo}</p>}
-            </div>
+                <div className="flex space-x-4">
+                  <Button type="submit" className="flex-1" disabled={isLoading || isCreated}>
+                    {isLoading ? 'Processing...' : 'Create Batch & Generate QR'}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
 
-            {/* Cost (Optional) */}
-            <div className="space-y-2">
-              <Label htmlFor="cost">Total Cost (Optional)</Label>
-              <Input 
-                id="cost" 
-                type="number" 
-                placeholder="e.g., 25000" 
-                value={formData.cost} 
-                onChange={handleChange}
-                disabled={isProcessing}
-                min="0"
-                step="0.01"
-              />
-              {errors.cost && <p className="text-sm text-red-500">{errors.cost}</p>}
-            </div>
-
-            {/* E-way Bill Number */}
-            <div className="space-y-2">
-              <Label htmlFor="currentLocation">Current Location</Label>
-              <Input 
-                id="currentLocation" 
-                placeholder="e.g., Nagpur" 
-                value={formData.currentLocation} 
-                onChange={handleChange}
-                disabled={isProcessing}
-              />
-              {errors.currentLocation && <p className="text-sm text-red-500">{errors.currentLocation}</p>}
-            </div>
-
-            {/* Description (Optional) */}
-            <div className="space-y-2">
-              <Label htmlFor="description">Description (Optional)</Label>
-              <Textarea 
-                id="description" 
-                placeholder="Add any extra details about the batch..." 
-                value={formData.description} 
-                onChange={handleChange}
-                disabled={isProcessing}
-                rows={3}
-              />
-            </div>
-
-            {/* Connection Status Display */}
-            <div className="text-sm text-gray-600 space-y-1">
-              <p>Wallet: {isConnected ? `✅ Connected (${actorAddress?.slice(0, 6)}...${actorAddress?.slice(-4)})` : '❌ Not Connected'}</p>
-              <p>Authentication: {userId ? '✅ Logged In' : '❌ Not Logged In'}</p>
-            </div>
-
-            <Button type="submit" className="w-full" disabled={isProcessing || !isConnected || !userId}>
-              {isWalletPending ? 'Confirm in Wallet...' : 
-               isConfirming ? 'Processing On-Chain...' : 
-               'Create Batch & Generate QR'}
-            </Button>
-          </form>
-
-          {hash && (
-            <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-              <p className="text-sm font-medium text-blue-700">Transaction Sent!</p>
-              <p className="text-xs text-blue-600 mt-1 break-all">Hash: {hash}</p>
-              {isConfirming && <p className="text-xs text-blue-600 mt-1">⏳ Waiting for confirmation...</p>}
-            </div>
-          )}
-
-          {isConfirmed && (
-            <div className="mt-4 p-3 bg-green-50 rounded-lg">
-              <p className="text-sm font-medium text-green-700">✅ Transaction Confirmed!</p>
-              <p className="text-xs text-green-600 mt-1">Saving to database and generating QR code...</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          <div className="space-y-6">
+            <Card>
+              <CardHeader><CardTitle className="flex items-center"><QrCode className="mr-2"/>QR Code & Batch Info</CardTitle></CardHeader>
+              <CardContent className="text-center min-h-[300px] flex flex-col justify-center items-center">
+                {!isCreated ? (
+                  <div className="text-gray-500">
+                    <QrCode className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                    <p>QR code will appear here after creation.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 w-full">
+                    <div className="bg-white p-2 rounded-lg inline-block shadow-md border mx-auto">
+                      <Image src={state.qrCodeUrl} alt="Batch QR Code" width={180} height={180} />
+                    </div>
+                    <div className="space-y-2 text-left text-xs text-gray-600 break-all">
+                      <p><strong>Batch ID:</strong> {state.batchId}</p>
+                      <p><strong>Tx Hash:</strong> {hash}</p>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
