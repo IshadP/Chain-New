@@ -77,7 +77,7 @@ export default function CreateBatchPage() {
           category: data.category,
           internal_batch_no: data.internalBatchNo,
           quantity: data.quantity,
-          // ewaybillNo and currentLocation are no longer sent here
+          status: 'Received',
           created_at: new Date().toISOString(),
         }),
       });

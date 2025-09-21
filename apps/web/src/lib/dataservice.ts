@@ -66,19 +66,128 @@ export const getAllProfiles = async () => {
 };
 
 /**
- * Fetches potential recipients (distributors and retailers) for a transfer,
- * excluding the current user.
+ * UPDATED: Fetches potential recipients based on the current user's role and smart contract transfer rules:
+ * - Manufacturer → Distributor only
+ * - Distributor → Distributor OR Retailer
+ * - Retailer → Retailer only
  */
-export const getPotentialRecipients = async (currentUserId: string) => {
+export const getPotentialRecipients = async (currentUserId: string, currentUserRole: 'manufacturer' | 'distributor' | 'retailer') => {
     try {
         const cleanedCurrentUserId = cleanString(currentUserId);
         if (!cleanedCurrentUserId) throw new Error("Current user ID is required.");
-        const { data, error } = await supabase.from('profiles').select('id, wallet_address, role').not('id', 'eq', cleanedCurrentUserId).in('role', ['distributor', 'retailer']);
+        if (!currentUserRole) throw new Error("Current user role is required.");
+
+        let allowedRoles: string[] = [];
+        
+        // Define transfer rules based on smart contract logic
+        switch (currentUserRole) {
+            case 'manufacturer':
+                // Manufacturers can only transfer to distributors
+                allowedRoles = ['distributor'];
+                break;
+            case 'distributor':
+                // Distributors can transfer to other distributors or retailers
+                allowedRoles = ['distributor', 'retailer'];
+                break;
+            case 'retailer':
+                // Retailers can transfer to other retailers
+                allowedRoles = ['retailer'];
+                break;
+            default:
+                throw new Error(`Invalid user role: ${currentUserRole}`);
+        }
+
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, wallet_address, role')
+            .not('id', 'eq', cleanedCurrentUserId)
+            .in('role', allowedRoles);
+            
         if (error) throw new Error(`Failed to fetch recipients: ${error.message}`);
         return data || [];
     } catch (error) {
         console.error('Error in getPotentialRecipients:', error);
         return [];
+    }
+};
+
+/**
+ * NEW: Helper function to validate if a transfer is allowed based on roles
+ * This mirrors the smart contract's canTransferTo function
+ */
+export const canTransferTo = (fromRole: string, toRole: string): boolean => {
+    if (fromRole === 'manufacturer') {
+        return toRole === 'distributor';
+    } else if (fromRole === 'distributor') {
+        return toRole === 'distributor' || toRole === 'retailer';
+    } else if (fromRole === 'retailer') {
+        return toRole === 'retailer';
+    }
+    return false;
+};
+
+/**
+ * NEW: Get user profile by wallet address (useful for transfer validation)
+ */
+export const getUserProfileByWallet = async (walletAddress: string) => {
+    try {
+        const cleanWallet = cleanString(walletAddress);
+        if (!cleanWallet) throw new Error("Wallet address is required.");
+        
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('wallet_address', cleanWallet)
+            .single();
+            
+        if (error) {
+            if (error.code === 'PGRST116') {
+                // No rows found
+                return null;
+            }
+            throw new Error(`Failed to fetch user profile: ${error.message}`);
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('Error in getUserProfileByWallet:', error);
+        return null;
+    }
+};
+
+/**
+ * NEW: Validate transfer before executing (for additional security)
+ */
+export const validateTransfer = async (senderWallet: string, recipientWallet: string): Promise<{ valid: boolean; error?: string }> => {
+    try {
+        const senderProfile = await getUserProfileByWallet(senderWallet);
+        const recipientProfile = await getUserProfileByWallet(recipientWallet);
+        
+        if (!senderProfile) {
+            return { valid: false, error: "Sender profile not found" };
+        }
+        
+        if (!recipientProfile) {
+            return { valid: false, error: "Recipient profile not found" };
+        }
+        
+        if (senderWallet === recipientWallet) {
+            return { valid: false, error: "Cannot transfer to yourself" };
+        }
+        
+        const isAllowed = canTransferTo(senderProfile.role, recipientProfile.role);
+        
+        if (!isAllowed) {
+            return { 
+                valid: false, 
+                error: `Transfer not allowed: ${senderProfile.role} cannot transfer to ${recipientProfile.role}` 
+            };
+        }
+        
+        return { valid: true };
+    } catch (error) {
+        console.error('Error in validateTransfer:', error);
+        return { valid: false, error: 'Transfer validation failed' };
     }
 };
 
@@ -145,14 +254,31 @@ export const getBatchesForUser = async (walletAddress: string) => {
 };
 
 /**
- * Updates a batch's state to "InTransit" in the database.
- * Uses the admin client as it's called from a secure API route.
+ * UPDATED: Updates a batch's state to "InTransit" with additional validation
  */
-export const transferBatchOffChain = async (batchId: string, recipientWallet: string) => {
+export const transferBatchOffChain = async (batchId: string, recipientWallet: string, senderWallet: string) => {
     try {
+        // Validate the transfer before executing
+        const validation = await validateTransfer(senderWallet, recipientWallet);
+        if (!validation.valid) {
+            throw new Error(`Transfer validation failed: ${validation.error}`);
+        }
+
         const supabaseAdmin = getSupabaseAdmin();
-        const { data, error } = await supabaseAdmin.from('inventory').update({ current_holder_wallet: null, intended_recipient_wallet: cleanString(recipientWallet), status: 'InTransit' }).eq('batch_id', cleanString(batchId)).select().single();
+        const { data, error } = await supabaseAdmin
+            .from('inventory')
+            .update({ 
+                current_holder_wallet: null, 
+                intended_recipient_wallet: cleanString(recipientWallet), 
+                status: 'InTransit',
+                updated_at: new Date().toISOString()
+            })
+            .eq('batch_id', cleanString(batchId))
+            .eq('current_holder_wallet', cleanString(senderWallet)) // Additional security check
+            .select().single();
+            
         if (error) throw error;
+        if (!data) throw new Error('No batch found or you are not the current holder');
         return data;
     } catch (error) {
         console.error("Error in transferBatchOffChain:", error);
@@ -161,14 +287,25 @@ export const transferBatchOffChain = async (batchId: string, recipientWallet: st
 };
 
 /**
- * Completes a transfer by updating a batch's state to "Received".
- * Uses the admin client as it's called from a secure API route.
+ * UPDATED: Completes a transfer by updating a batch's state to "Received" with additional validation
  */
 export const receiveBatchOffChain = async (batchId: string, receiverWallet: string) => {
     try {
         const supabaseAdmin = getSupabaseAdmin();
-        const { data, error } = await supabaseAdmin.from('inventory').update({ current_holder_wallet: cleanString(receiverWallet), intended_recipient_wallet: null, status: 'Received' }).eq('batch_id', cleanString(batchId)).select().single();
+        const { data, error } = await supabaseAdmin
+            .from('inventory')
+            .update({ 
+                current_holder_wallet: cleanString(receiverWallet), 
+                intended_recipient_wallet: null, 
+                status: 'Received',
+                updated_at: new Date().toISOString()
+            })
+            .eq('batch_id', cleanString(batchId))
+            .eq('intended_recipient_wallet', cleanString(receiverWallet)) // Additional security check
+            .select().single();
+            
         if (error) throw error;
+        if (!data) throw new Error('No batch found or you are not the intended recipient');
         return data;
     } catch (error) {
         console.error("Error in receiveBatchOffChain:", error);
@@ -176,3 +313,55 @@ export const receiveBatchOffChain = async (batchId: string, receiverWallet: stri
     }
 };
 
+/**
+ * NEW: Get batches that can be transferred by a specific user (based on their role and current holdings)
+ */
+export const getTransferableBatchesForUser = async (walletAddress: string, userRole: 'manufacturer' | 'distributor' | 'retailer') => {
+    try {
+        const cleanWallet = cleanString(walletAddress);
+        if (!cleanWallet) return [];
+        
+        // Only get batches where the user is the current holder and status is 'Received'
+        const { data, error } = await supabase
+            .from('inventory')
+            .select('*')
+            .eq('current_holder_wallet', cleanWallet)
+            .eq('status', 'Received')
+            .order('created_at', { ascending: false });
+            
+        if (error) { 
+            throw new Error(`Failed to fetch transferable batches: ${error.message}`); 
+        }
+        
+        return data || [];
+    } catch (error) {
+        console.error('Error in getTransferableBatchesForUser:', error);
+        return [];
+    }
+};
+
+/**
+ * NEW: Get batches that are in transit to a specific user
+ */
+export const getIncomingBatchesForUser = async (walletAddress: string) => {
+    try {
+        const cleanWallet = cleanString(walletAddress);
+        if (!cleanWallet) return [];
+        
+        const { data, error } = await supabase
+            .from('inventory')
+            .select('*')
+            .eq('intended_recipient_wallet', cleanWallet)
+            .eq('status', 'InTransit')
+            .order('created_at', { ascending: false });
+            
+        if (error) { 
+            throw new Error(`Failed to fetch incoming batches: ${error.message}`); 
+        }
+        
+        return data || [];
+    } catch (error) {
+        console.error('Error in getIncomingBatchesForUser:', error);
+        return [];
+    }
+};
