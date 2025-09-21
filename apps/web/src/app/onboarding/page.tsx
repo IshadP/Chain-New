@@ -1,5 +1,3 @@
-// FILE: apps/web/src/app/onboarding/page.tsx
-
 "use client";
 
 import { useState } from "react";
@@ -32,7 +30,7 @@ export default function OnboardingPage() {
     if (!user || !selectedRole || !walletAddress) {
       toast({
         title: "Error",
-        description: "Please select a role and connect your wallet to continue.",
+        description: "Please select a role and connect your wallet.",
         variant: "destructive",
       });
       return;
@@ -40,17 +38,24 @@ export default function OnboardingPage() {
 
     setIsLoading(true);
     try {
+      // Call the server action to save the profile
       await updateUserRoleAndProfile({
         role: selectedRole,
         walletAddress: walletAddress,
       });
 
+      // CRITICAL STEP: Reload the user object on the client.
+      // This fetches the latest session claims (including the new role).
+      await user.reload();
+
       toast({
         title: "Onboarding Complete!",
-        description: "Your profile has been saved.",
+        description: "Your profile has been saved. Redirecting...",
       });
 
+      // Now, router.push will work because the middleware will see the updated claims.
       router.push("/dashboard");
+
     } catch (error) {
       console.error("Onboarding failed:", error);
       toast({
@@ -69,11 +74,10 @@ export default function OnboardingPage() {
         <CardHeader>
           <CardTitle className="text-2xl">Welcome! Let's Get You Set Up.</CardTitle>
           <CardDescription>
-            Complete these two steps to start using the application.
+            Complete these steps to start using the application.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
-          {/* Step 1: Role Selection */}
           <div className="space-y-2">
             <h3 className="font-semibold">Step 1: Choose Your Role</h3>
             <ToggleGroup
@@ -83,19 +87,12 @@ export default function OnboardingPage() {
               onValueChange={handleRoleSelection}
               className="w-full"
             >
-              <ToggleGroupItem value="manufacturer" className="flex-1">
-                Manufacturer
-              </ToggleGroupItem>
-              <ToggleGroupItem value="distributor" className="flex-1">
-                Distributor
-              </ToggleGroupItem>
-              <ToggleGroupItem value="retailer" className="flex-1">
-                Retailer
-              </ToggleGroupItem>
+              <ToggleGroupItem value="manufacturer" className="flex-1">Manufacturer</ToggleGroupItem>
+              <ToggleGroupItem value="distributor" className="flex-1">Distributor</ToggleGroupItem>
+              <ToggleGroupItem value="retailer" className="flex-1">Retailer</ToggleGroupItem>
             </ToggleGroup>
           </div>
 
-          {/* Step 2: Wallet Connection */}
           <div className="space-y-2">
             <h3 className="font-semibold">Step 2: Connect Your Wallet</h3>
             <div className="p-4 border rounded-md flex items-center justify-center">

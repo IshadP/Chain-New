@@ -1,31 +1,18 @@
-// FILE: apps/web/src/components/ReceiveModal.tsx
-
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../lib/deployment.json';
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 
-const SupplyChainABI = SupplyChainArtifact.abi;
-
 export function ReceiveModal({ batchId }: { batchId: string }) {
   const { toast } = useToast();
   const router = useRouter();
+  const { address: actorAddress } = useAccount(); // Get the receiver's wallet
 
   const { data: hash, writeContract, isPending, error: contractError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
@@ -33,47 +20,53 @@ export function ReceiveModal({ batchId }: { batchId: string }) {
   const handleReceive = () => {
     writeContract({
       address: deployment.address as `0x${string}`,
-      abi: SupplyChainABI,
+      abi: SupplyChainArtifact.abi,
       functionName: 'receiveBatch',
-      args: [batchId as `0x${string}`],
+      args: [batchId],
     });
   };
   
   useEffect(() => {
-    if (isConfirmed) {
-      toast({ title: "On-Chain Success!", description: "Batch has been received." });
-      
-      // Update off-chain data
-      fetch('/api/inventory/receive', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchId }),
-      })
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to update off-chain data");
-        toast({ title: "Off-Chain Success!", description: "Database updated."});
-        router.refresh();
-      })
-      .catch(err => {
-        console.error("Off-chain update failed:", err);
-        toast({ title: "CRITICAL ERROR", description: `On-chain receive succeeded but DB update failed. Batch ID: ${batchId}`, variant: "destructive", duration: 10000 });
-      });
+    if (isConfirmed && actorAddress) {
+      const processReceipt = async () => {
+        try {
+            toast({ title: "✅ On-Chain Success", description: "Batch has been received." });
+            // Update off-chain inventory state
+            await fetch('/api/inventory/receive', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ batchId }),
+            });
+            toast({ title: "💾 Off-Chain Success", description: "Database updated."});
+            
+            // Log the history event
+            await fetch('/api/history/add', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    batch_id: batchId, event_type: 'Received', actor_wallet: actorAddress,
+                    notes: 'Batch ownership confirmed by recipient.', tx_hash: hash,
+                }),
+            });
+            toast({ title: "📜 History Logged!", description: 'Receipt event recorded.' });
+            
+            router.refresh();
+
+        } catch(error) {
+            toast({ title: "Post-Receipt Failed", description: `CRITICAL: On-chain receipt succeeded but off-chain updates failed. Error: ${error instanceof Error ? error.message : 'Unknown'}`, variant: "destructive", duration: 15000 });
+        }
+      };
+      processReceipt();
     }
-     if(contractError){
-        toast({ title: "Contract Error", description: contractError.message, variant: "destructive" });
-    }
-  }, [isConfirmed, contractError, batchId, toast, router]);
+    if (contractError) { toast({ title: "Contract Error", description: contractError.message, variant: "destructive" }); }
+  }, [isConfirmed, contractError, batchId, toast, router, actorAddress, hash]);
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button variant="secondary">Receive</Button>
-      </AlertDialogTrigger>
+      <AlertDialogTrigger asChild><Button variant="secondary">Receive</Button></AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Confirm Receipt</AlertDialogTitle>
           <AlertDialogDescription>
-            You are about to take ownership of batch ID: {batchId.slice(0, 12)}... This action will be recorded on the blockchain.
+            You are about to take ownership of batch: {batchId.slice(0, 12)}... This action will be recorded on the blockchain.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

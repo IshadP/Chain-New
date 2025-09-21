@@ -1,78 +1,66 @@
-// FILE: apps/web/src/app/api/inventory/add/route.ts
-
-import { NextRequest, NextResponse } from 'next/server';
-import { getAuth } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import { createInventoryItem } from '@/lib/dataservice';
 
-export async function POST(req: NextRequest) {
-  console.log("API route /api/inventory/add called");
-  
+/**
+ * API route to create a new inventory item (batch).
+ * This route is secure and follows the "Wallet-Centric" model.
+ */
+export async function POST(request: Request) {
   try {
-    const { userId } = getAuth(req);
-    console.log("User ID from auth:", userId);
-    
+    // 1. Authenticate the user and get their session claims using the recommended `auth()` helper.
+    const { userId, sessionClaims } = await auth();
     if (!userId) {
-      console.error("No user ID found in request");
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 
-    const itemData = await req.json();
-    console.log("Received item data:", itemData);
-
-    // Ensure the userId from the session matches the manufacturer_id from the body
-    if (userId !== itemData.manufacturer_id) {
-        console.error(`User ID mismatch: ${userId} !== ${itemData.manufacturer_id}`);
-        return NextResponse.json({ error: 'User ID mismatch.' }, { status: 403 });
+    // 2. Security Check 1: Verify the user's role from their session metadata.
+    //    Only users with the 'manufacturer' role are allowed to create batches.
+    const userRole = sessionClaims?.publicMetadata?.role;
+    if (userRole !== 'manufacturer') {
+        return new NextResponse(JSON.stringify({ error: 'Forbidden: Only manufacturers can create batches.' }), { status: 403 });
     }
 
-    // Validate required fields
-    const requiredFields = ['batch_id', 'product_name', 'category', 'current_holder_wallet', 'eway_bill_no', 'cost', 'created_at'];
-    const missingFields = requiredFields.filter(field => !itemData[field]);
-    
-    if (missingFields.length > 0) {
-      console.error("Missing required fields:", missingFields);
-      return NextResponse.json({ 
-        error: `Missing required fields: ${missingFields.join(', ')}` 
-      }, { status: 400 });
+    // 3. Security Check 2: Get the manufacturer's wallet address from their session.
+    //    This prevents stale session issues and ensures the correct wallet is used.
+    const manufacturerWallet = sessionClaims?.publicMetadata?.wallet_address as string;
+    if (!manufacturerWallet) {
+        return new NextResponse(JSON.stringify({ error: 'Forbidden: Wallet address not found in user session. Please sign out and sign back in to refresh your session.' }), { status: 403 });
     }
 
-    console.log("Calling createInventoryItem...");
-    const newItem = await createInventoryItem(itemData);
+    // 4. Get the descriptive, off-chain data from the request body.
+    const itemData = await request.json();
 
-    if (!newItem) {
-      console.error("createInventoryItem returned null/undefined");
-      return NextResponse.json({ error: 'Failed to create inventory item in database.' }, { status: 500 });
-    }
+    // 5. Construct the final data object to be saved.
+    //    This is a critical security step: we ignore any user/wallet data sent from the client
+    //    and use the authenticated session data as the single source of truth.
+    const dataToSave = {
+      ...itemData,
+      manufacturer_id: userId, // The authenticated Clerk user ID
+      manufacturer_wallet: manufacturerWallet, // The authenticated user's wallet
+      current_holder_wallet: manufacturerWallet, // The creator is always the first holder
+    };
 
-    console.log("Successfully created inventory item:", newItem);
-    return NextResponse.json({ 
-      message: 'Inventory item created successfully.', 
-      data: newItem 
-    }, { status: 201 });
+    // 6. Call the dataservice function to create the item in the database.
+    const newItem = await createInventoryItem(dataToSave);
+
+    // 7. Return the newly created item with a 201 Created status.
+    return NextResponse.json(newItem, { status: 201 });
 
   } catch (error) {
-    console.error('Error in /api/inventory/add:', error);
+    console.error('API Error in /api/inventory/add:', error);
     
-    // Provide more specific error messages
-    let errorMessage = 'An unexpected server error occurred.';
-    let statusCode = 500;
-    
-    if (error && typeof error === 'object' && 'message' in error) {
-      errorMessage = (error as Error).message;
-      
-      // Check for specific Supabase errors
-      if (errorMessage.includes('duplicate key value')) {
-        errorMessage = 'Batch ID already exists';
-        statusCode = 409;
-      } else if (errorMessage.includes('foreign key constraint')) {
-        errorMessage = 'Invalid reference to related data';
-        statusCode = 400;
-      } else if (errorMessage.includes('not-null constraint')) {
-        errorMessage = 'Missing required field';
-        statusCode = 400;
-      }
+    // 8. Provide clear and specific error responses.
+    const errorMessage = error instanceof Error ? error.message : 'An unknown server error occurred';
+    let statusCode = 500; // Default to Internal Server Error
+
+    if (errorMessage.includes("already exists")) {
+        statusCode = 409; // Conflict (e.g., duplicate batch ID)
+    } else if (errorMessage.includes("is required")) {
+        statusCode = 400; // Bad Request (e.g., missing essential data)
     }
-    
-    return NextResponse.json({ error: errorMessage }, { status: statusCode });
+
+    return new NextResponse(JSON.stringify({ error: errorMessage }), { status: statusCode });
   }
 }
+

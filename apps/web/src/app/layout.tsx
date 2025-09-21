@@ -1,24 +1,15 @@
-// FILE: apps/web/src/app/layout.tsx
-
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
-import { WalletProvider } from "@/components/WalletProvider"; // <-- IMPORTED
+import { WalletProvider } from "@/components/WalletProvider";
+import { WalletSessionManager } from "@/components/WalletSessionManager"; // 1. Import the new component
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Supply Chain dApp",
-  description: "A decentralized application for tracking supply chain products.",
+  title: "SupChain - Supply Chain Management",
+  description: "Transparent and secure supply chain management on the blockchain.",
 };
 
 export default function RootLayout({
@@ -28,15 +19,17 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider>
-      <WalletProvider>
-        <html lang="en">
-          <body
-            className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-          >
+      <html lang="en">
+        <body className={inter.className}>
+          <WalletProvider>
+            {/* 2. Add the WalletSessionManager here */}
+            {/* It will now monitor the session on all pages */}
+            <WalletSessionManager />
+            
             {children}
-          </body>
-        </html>
-      </WalletProvider>
+          </WalletProvider>
+        </body>
+      </html>
     </ClerkProvider>
   );
 }

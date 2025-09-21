@@ -1,113 +1,96 @@
-// FILE: apps/contracts/contracts/SupplyChain.sol
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 contract SupplyChain {
+    // Role mappings remain the same
     mapping(address => bool) public isManufacturer;
     mapping(address => bool) public isDistributor;
     mapping(address => bool) public isRetailer;
 
     enum Status { Created, InTransit, Received }
 
+    // UPDATED: Added back ewaybillNo and currentLocation for on-chain tracking
     struct Batch {
-        bytes16 batchId; // CHANGED: from bytes32 to bytes16
+        bytes16 batchId;
         address creator;
         address currentHolder;
-        uint256 quantity;
-        string ewaybillNo;
-        uint256 cost;
-        string internalBatchNo;
-        string currentLocation;
+        address intendedRecipient;
+        string ewaybillNo; // ADDED BACK
+        string currentLocation; // ADDED BACK
         Status status;
         uint256 createdAt;
         uint256 updatedAt;
     }
 
-    mapping(bytes16 => Batch) public products; // CHANGED: Key is now bytes16
+    mapping(bytes16 => Batch) public products;
 
-    event BatchCreated(bytes16 indexed batchId, address indexed creator, uint256 quantity); // CHANGED
-    event BatchTransferred(bytes16 indexed batchId, address indexed from, address indexed to); // CHANGED
-    event BatchReceived(bytes16 indexed batchId, address indexed receiver); // CHANGED
+    // Events and Modifiers remain the same...
+    event BatchCreated(bytes16 indexed batchId, address indexed creator);
+    event BatchTransferred(bytes16 indexed batchId, address indexed from, address indexed to);
+    event BatchReceived(bytes16 indexed batchId, address indexed receiver);
     event RoleGranted(address indexed user, string role);
     event RoleRevoked(address indexed user, string role);
-
-    modifier onlyManufacturer() {
-        require(isManufacturer[msg.sender], "Caller is not a manufacturer");
-        _;
-    }
-
-    modifier onlyCurrentHolder(bytes16 _batchId) { // CHANGED
-        require(msg.sender == products[_batchId].currentHolder, "Caller is not the current holder");
-        _;
-    }
-    
-    modifier batchExists(bytes16 _batchId) { // CHANGED
-        require(products[_batchId].createdAt != 0, "Batch does not exist");
-        _;
-    }
-
-    constructor() {
-        isManufacturer[msg.sender] = true;
-        emit RoleGranted(msg.sender, "Manufacturer");
-    }
-
-    // Role management functions remain the same...
+    modifier onlyManufacturer() { require(isManufacturer[msg.sender], "Caller is not a manufacturer"); _; }
+    modifier onlyCurrentHolder(bytes16 _batchId) { require(msg.sender == products[_batchId].currentHolder, "Caller is not the current holder"); _; }
+    modifier batchExists(bytes16 _batchId) { require(products[_batchId].createdAt != 0, "Batch does not exist"); _; }
+    constructor() { isManufacturer[msg.sender] = true; emit RoleGranted(msg.sender, "Manufacturer"); }
     function grantManufacturerRole(address _manufacturer) external { require(_manufacturer != address(0)); isManufacturer[_manufacturer] = true; emit RoleGranted(_manufacturer, "Manufacturer"); }
     function grantDistributorRole(address _distributor) external onlyManufacturer { require(_distributor != address(0)); isDistributor[_distributor] = true; emit RoleGranted(_distributor, "Distributor"); }
     function revokeDistributorRole(address _distributor) external onlyManufacturer { require(_distributor != address(0)); isDistributor[_distributor] = false; emit RoleRevoked(_distributor, "Distributor"); }
     function grantRetailerRole(address _retailer) external onlyManufacturer { require(_retailer != address(0)); isRetailer[_retailer] = true; emit RoleGranted(_retailer, "Retailer"); }
     function revokeRetailerRole(address _retailer) external onlyManufacturer { require(_retailer != address(0)); isRetailer[_retailer] = false; emit RoleRevoked(_retailer, "Retailer"); }
-
+    
+    /**
+     * UPDATED
+     * The function now accepts ewaybillNo and currentLocation to store them on-chain.
+     */
     function createBatch(
-        bytes16 _batchId, // CHANGED
-        uint256 _quantity,
+        bytes16 _batchId,
         string memory _ewaybillNo,
-        uint256 _cost,
-        string memory _internalBatchNo,
         string memory _currentLocation
     ) external onlyManufacturer {
         require(_batchId != bytes16(0), "Batch ID cannot be empty");
         require(products[_batchId].createdAt == 0, "Batch ID already exists");
-        require(_quantity > 0, "Quantity must be greater than zero");
 
         products[_batchId] = Batch({
             batchId: _batchId,
             creator: msg.sender,
             currentHolder: msg.sender,
-            quantity: _quantity,
-            ewaybillNo: _ewaybillNo,
-            cost: _cost,
-            internalBatchNo: _internalBatchNo,
-            currentLocation: _currentLocation,
+            intendedRecipient: address(0),
+            ewaybillNo: _ewaybillNo, // ADDED BACK
+            currentLocation: _currentLocation, // ADDED BACK
             status: Status.Received,
             createdAt: block.timestamp,
             updatedAt: block.timestamp
         });
 
-        emit BatchCreated(_batchId, msg.sender, _quantity);
+        emit BatchCreated(_batchId, msg.sender);
     }
     
-    function transferBatch(bytes16 _batchId, address _newHolder) external batchExists(_batchId) onlyCurrentHolder(_batchId) { // CHANGED
-        require(_newHolder != address(0));
-        require(isDistributor[_newHolder] || isRetailer[_newHolder]);
+    // transferBatch and receiveBatch functions remain the same
+    function transferBatch(bytes16 _batchId, address _recipient) external batchExists(_batchId) onlyCurrentHolder(_batchId) {
+        require(_recipient != address(0), "Recipient cannot be the zero address");
+        require(isDistributor[_recipient] || isRetailer[_recipient], "Recipient is not a distributor or retailer");
         Batch storage batch = products[_batchId];
-        require(batch.status == Status.Received);
-        batch.currentHolder = _newHolder;
+        batch.intendedRecipient = _recipient;
+        batch.currentHolder = address(0);
         batch.status = Status.InTransit;
         batch.updatedAt = block.timestamp;
-        emit BatchTransferred(_batchId, msg.sender, _newHolder);
+        emit BatchTransferred(_batchId, msg.sender, _recipient);
     }
 
-    function receiveBatch(bytes16 _batchId) external batchExists(_batchId) onlyCurrentHolder(_batchId) { // CHANGED
+    function receiveBatch(bytes16 _batchId) external batchExists(_batchId) {
         Batch storage batch = products[_batchId];
-        require(batch.status == Status.InTransit);
+        require(msg.sender == batch.intendedRecipient, "Caller is not the intended recipient");
+        batch.currentHolder = msg.sender;
+        batch.intendedRecipient = address(0);
         batch.status = Status.Received;
         batch.updatedAt = block.timestamp;
         emit BatchReceived(_batchId, msg.sender);
     }
 
-    function getBatch(bytes16 _batchId) external view batchExists(_batchId) returns (Batch memory) { // CHANGED
+    function getBatch(bytes16 _batchId) external view batchExists(_batchId) returns (Batch memory) {
         return products[_batchId];
     }
 }
+
