@@ -30,10 +30,20 @@ contract SupplyChain {
     event BatchReceived(bytes16 indexed batchId, address indexed receiver);
     event RoleGranted(address indexed user, string role);
     event RoleRevoked(address indexed user, string role);
+    
     modifier onlyManufacturer() { require(isManufacturer[msg.sender], "Caller is not a manufacturer"); _; }
     modifier onlyCurrentHolder(bytes16 _batchId) { require(msg.sender == products[_batchId].currentHolder, "Caller is not the current holder"); _; }
     modifier batchExists(bytes16 _batchId) { require(products[_batchId].createdAt != 0, "Batch does not exist"); _; }
+    
+    // UPDATED: New modifier to check if caller has any valid role
+    modifier onlyValidRole() { 
+        require(isManufacturer[msg.sender] || isDistributor[msg.sender] || isRetailer[msg.sender], 
+                "Caller does not have any valid role"); 
+        _; 
+    }
+    
     constructor() { isManufacturer[msg.sender] = true; emit RoleGranted(msg.sender, "Manufacturer"); }
+    
     function grantManufacturerRole(address _manufacturer) external { require(_manufacturer != address(0)); isManufacturer[_manufacturer] = true; emit RoleGranted(_manufacturer, "Manufacturer"); }
     function grantDistributorRole(address _distributor) external onlyManufacturer { require(_distributor != address(0)); isDistributor[_distributor] = true; emit RoleGranted(_distributor, "Distributor"); }
     function revokeDistributorRole(address _distributor) external onlyManufacturer { require(_distributor != address(0)); isDistributor[_distributor] = false; emit RoleRevoked(_distributor, "Distributor"); }
@@ -67,10 +77,24 @@ contract SupplyChain {
         emit BatchCreated(_batchId, msg.sender);
     }
     
-    // transferBatch and receiveBatch functions remain the same
-    function transferBatch(bytes16 _batchId, address _recipient) external batchExists(_batchId) onlyCurrentHolder(_batchId) {
+    // UPDATED: Modified transferBatch to allow transfers based on current holder's role
+    function transferBatch(bytes16 _batchId, address _recipient) external batchExists(_batchId) onlyCurrentHolder(_batchId) onlyValidRole {
         require(_recipient != address(0), "Recipient cannot be the zero address");
-        require(isDistributor[_recipient] || isRetailer[_recipient], "Recipient is not a distributor or retailer");
+        require(_recipient != msg.sender, "Cannot transfer to yourself");
+        
+        // Define transfer rules based on current holder's role
+        if (isManufacturer[msg.sender]) {
+            // Manufacturer can only transfer to distributors
+            require(isDistributor[_recipient], "Manufacturer can only transfer to distributors");
+        } else if (isDistributor[msg.sender]) {
+            // Distributor can transfer to other distributors or retailers
+            require(isDistributor[_recipient] || isRetailer[_recipient], 
+                    "Distributor can only transfer to distributors or retailers");
+        } else if (isRetailer[msg.sender]) {
+            // Retailers typically don't transfer further, but if they do, only to other retailers
+            require(isRetailer[_recipient], "Retailer can only transfer to other retailers");
+        }
+        
         Batch storage batch = products[_batchId];
         batch.intendedRecipient = _recipient;
         batch.currentHolder = address(0);
@@ -79,9 +103,12 @@ contract SupplyChain {
         emit BatchTransferred(_batchId, msg.sender, _recipient);
     }
 
-    function receiveBatch(bytes16 _batchId) external batchExists(_batchId) {
+    // UPDATED: Modified receiveBatch to ensure only valid roles can receive
+    function receiveBatch(bytes16 _batchId) external batchExists(_batchId) onlyValidRole {
         Batch storage batch = products[_batchId];
         require(msg.sender == batch.intendedRecipient, "Caller is not the intended recipient");
+        require(batch.status == Status.InTransit, "Batch is not in transit");
+        
         batch.currentHolder = msg.sender;
         batch.intendedRecipient = address(0);
         batch.status = Status.Received;
@@ -92,5 +119,27 @@ contract SupplyChain {
     function getBatch(bytes16 _batchId) external view batchExists(_batchId) returns (Batch memory) {
         return products[_batchId];
     }
+    
+    // HELPER: Function to check what role an address has (useful for frontend)
+    function getUserRole(address _user) external view returns (string memory) {
+        if (isManufacturer[_user]) return "manufacturer";
+        if (isDistributor[_user]) return "distributor";
+        if (isRetailer[_user]) return "retailer";
+        return "none";
+    }
+    
+    // HELPER: Function to check if a transfer is valid (useful for frontend validation)
+    function canTransferTo(address _from, address _to) external view returns (bool) {
+        if (_from == _to) return false;
+        
+        if (isManufacturer[_from]) {
+            return isDistributor[_to];
+        } else if (isDistributor[_from]) {
+            return isDistributor[_to] || isRetailer[_to];
+        } else if (isRetailer[_from]) {
+            return isRetailer[_to];
+        }
+        
+        return false;
+    }
 }
-
