@@ -62,6 +62,7 @@ export default function DashboardPage() {
                 <Link href="/create-batch">Create New Batch</Link>
               </Button>
             )}
+            
             <ConnectWallet />
             <UserButton />
         </div>

@@ -52,20 +52,6 @@ export const upsertUserProfile = async (profile: { id: string; role: 'manufactur
 };
 
 /**
- * Fetches all user profiles. Used by the admin panel.
- */
-export const getAllProfiles = async () => {
-    try {
-        const { data, error } = await supabase.from('profiles').select('*');
-        if (error) throw new Error(`Failed to fetch profiles: ${error.message}`);
-        return data || [];
-      } catch (error) {
-        console.error('Error in getAllProfiles:', error);
-        return [];
-      }
-};
-
-/**
  * UPDATED: Fetches potential recipients based on the current user's role and smart contract transfer rules:
  * - Manufacturer → Distributor only
  * - Distributor → Distributor OR Retailer
@@ -73,41 +59,62 @@ export const getAllProfiles = async () => {
  */
 export const getPotentialRecipients = async (currentUserId: string, currentUserRole: 'manufacturer' | 'distributor' | 'retailer') => {
     try {
-        const cleanedCurrentUserId = cleanString(currentUserId);
-        if (!cleanedCurrentUserId) throw new Error("Current user ID is required.");
-        if (!currentUserRole) throw new Error("Current user role is required.");
+        console.log("=============================================");
+        console.log("🚀 Starting getPotentialRecipients...");
+        console.log(`- Current User ID: ${currentUserId}`);
+        console.log(`- Current User Role: ${currentUserRole}`);
+
+        if (!currentUserId || !currentUserRole) {
+            console.error("❌ ERROR: User ID or Role is missing.");
+            throw new Error("Current user ID and role are required.");
+        }
 
         let allowedRoles: string[] = [];
         
         // Define transfer rules based on smart contract logic
         switch (currentUserRole) {
             case 'manufacturer':
-                // Manufacturers can only transfer to distributors
                 allowedRoles = ['distributor'];
                 break;
             case 'distributor':
-                // Distributors can transfer to other distributors or retailers
                 allowedRoles = ['distributor', 'retailer'];
                 break;
             case 'retailer':
-                // Retailers can transfer to other retailers
                 allowedRoles = ['retailer'];
                 break;
             default:
+                console.error(`❌ ERROR: Invalid user role provided: ${currentUserRole}`);
                 throw new Error(`Invalid user role: ${currentUserRole}`);
         }
+        
+        console.log(`- Determined Allowed Roles for Query: ${JSON.stringify(allowedRoles)}`);
 
+        // If there are no allowed roles, we can stop here
+        if (allowedRoles.length === 0) {
+            console.warn("- No roles are allowed for this user. Returning empty array.");
+            return [];
+        }
+
+        console.log("- Querying Supabase for potential recipients...");
         const { data, error } = await supabase
             .from('profiles')
-            .select('id, wallet_address, role')
-            .not('id', 'eq', cleanedCurrentUserId)
-            .in('role', allowedRoles);
+            .select('*')
+            .not('id', 'eq', currentUserId) // Exclude the current user
+            .in('role', allowedRoles);     // Filter by the allowed roles
             
-        if (error) throw new Error(`Failed to fetch recipients: ${error.message}`);
+        if (error) {
+            console.error("❌ SUPABASE ERROR:", error.message);
+            throw new Error(`Failed to fetch recipients: ${error.message}`);
+        }
+
+        console.log(`- Supabase query returned ${data ? data.length : 0} records.`);
+        console.log("✅ Finished getPotentialRecipients successfully.");
+        console.log("=============================================\n");
+        
         return data || [];
     } catch (error) {
-        console.error('Error in getPotentialRecipients:', error);
-        return [];
+        console.error('❌ FATAL ERROR in getPotentialRecipients:', error);
+        return []; // Return empty array on failure
     }
 };
 
@@ -124,6 +131,17 @@ export const canTransferTo = (fromRole: string, toRole: string): boolean => {
         return toRole === 'retailer';
     }
     return false;
+};
+
+export const getAllProfiles = async () => {
+    try {
+        const { data, error } = await supabase.from('profiles').select('*');
+        if (error) throw new Error(`Failed to fetch profiles: ${error.message}`);
+        return data || [];
+      } catch (error) {
+        console.error('Error in getAllProfiles:', error);
+        return [];
+      }
 };
 
 /**

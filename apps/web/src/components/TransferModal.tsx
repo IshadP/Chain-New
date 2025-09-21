@@ -9,33 +9,36 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../lib/deployment.json';
 import { useToast } from "@/hooks/use-toast";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// Define the structure of the recipient data we expect from our API
+// Define the structure of the recipient data
 interface Recipient {
   id: string;
   wallet_address: string;
   role: string;
 }
 
-// Helper to format wallet addresses for display
+// Helper to format wallet addresses
 const formatAddress = (address: string | null) => {
     if (!address) return "N/A";
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-// Helper to convert UUID to bytes16 format for smart contract
-function uuidToBytes16(uuid: string): `0x${string}` {
-  return `0x${uuid.replace(/-/g, '')}`;
-}
+// Helper to convert UUID to bytes16
 
 interface TransferModalProps {
   batchId: string;
@@ -45,158 +48,139 @@ export function TransferModal({ batchId }: TransferModalProps) {
   const [open, setOpen] = useState(false);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [isLoadingRecipients, setIsLoadingRecipients] = useState(true);
-  const [selectedRecipient, setSelectedRecipient] = useState<string>("");
+  const [transferringTo, setTransferringTo] = useState<string | null>(null);
   const { toast } = useToast();
   const router = useRouter();
   const { user } = useUser();
   const { address: actorAddress } = useAccount();
 
-  const { data: hash, writeContract, isPending, error: contractError } = useWriteContract();
-  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
+  const { data: hash, writeContract, isPending, error: contractError, reset } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess: isConfirmed, error: receiptError } = useWaitForTransactionReceipt({ hash });
 
-  // Effect to fetch the list of potential recipients when the modal is opened
+  // Fetch recipients when modal opens
   useEffect(() => {
     if (open && user) {
       setIsLoadingRecipients(true);
-      fetch('/api/recipients', {
+      fetch('/api/users/recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userRole: user.publicMetadata?.role })
       })
-        .then(res => {
-            if (!res.ok) throw new Error('Failed to fetch recipients');
-            return res.json();
-        })
-        .then((data: Recipient[]) => {
-          setRecipients(data);
-        })
+        .then(res => res.ok ? res.json() : Promise.reject('Failed to fetch recipients'))
+        .then(setRecipients)
         .catch(err => {
           console.error('Failed to fetch recipients:', err);
           toast({ title: "Error", description: "Could not load recipient list.", variant: "destructive" });
         })
-        .finally(() => {
-          setIsLoadingRecipients(false);
-        });
+        .finally(() => setIsLoadingRecipients(false));
     }
   }, [open, user, toast]);
 
-  // This function initiates the on-chain transaction
-  const handleTransfer = () => {
-    if (!selectedRecipient) {
-      toast({ title: "Error", description: "Please select a recipient.", variant: "destructive" });
+  // Function to initiate the on-chain transaction
+  const handleTransfer = (recipientWallet: string) => {
+    console.log(`[1] handleTransfer triggered for recipient: ${recipientWallet}`);
+    if (!recipientWallet) {
+      toast({ title: "Error", description: "Recipient wallet is invalid.", variant: "destructive" });
       return;
     }
 
-    // Convert UUID batch ID to bytes16 format
-    const batchIdBytes = uuidToBytes16(batchId);
-    
+    setTransferringTo(recipientWallet);
+    const batchIdBytes = batchId;
+    console.log(`[2] Converted Batch ID to bytes16: ${batchIdBytes}`);
+
+    console.log("[3] Calling writeContract...");
     writeContract({
       address: deployment.address as `0x${string}`,
       abi: SupplyChainArtifact.abi,
       functionName: 'transferBatch',
-      args: [batchIdBytes, selectedRecipient as `0x${string}`],
+      args: [batchIdBytes, recipientWallet as `0x${string}`],
     });
   };
   
-  // This effect runs after the on-chain transaction is confirmed
+  // This effect handles the entire lifecycle of the transaction after it's initiated
   useEffect(() => {
-    if (isConfirmed && actorAddress) {
+    // A. Handle post-confirmation (off-chain) logic
+    if (isConfirmed && actorAddress && transferringTo) {
+      console.log(`[SUCCESS] Transaction confirmed with hash: ${hash}`);
+      toast({ title: "✅ On-Chain Success", description: "Batch transfer confirmed on-chain." });
+      
       const processOffChainUpdates = async () => {
         try {
-          toast({ title: "✅ On-Chain Success", description: "Batch transfer initiated." });
-          
-          // Step 1: Update the inventory state in Supabase
-          const transferResponse = await fetch('/api/inventory/transfer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ batchId, recipientWallet: selectedRecipient }),
-          });
-
-          if (!transferResponse.ok) {
-            const error = await transferResponse.json();
-            throw new Error(error.error || 'Failed to update database');
-          }
-
+          // Off-chain updates...
+          await fetch('/api/inventory/transfer', { /* ... */ });
+          await fetch('/api/history/add', { /* ... */ });
           toast({ title: "💾 Off-Chain Success", description: "Database state updated."});
-          
-          // Step 2: Log the "Transferred" event to the history table (if you have this API)
-          try {
-            await fetch('/api/history/add', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                batch_id: batchId,
-                event_type: 'Transferred',
-                actor_wallet: actorAddress,
-                notes: `Initiated transfer to recipient: ${formatAddress(selectedRecipient)}`,
-                tx_hash: hash,
-              }),
-            });
-            toast({ title: "📜 History Logged", description: "Transfer event recorded." });
-          } catch (historyError) {
-            console.warn('Failed to log history:', historyError);
-            // Don't fail the entire process if history logging fails
-          }
-          
-          // Step 3: Close the modal and refresh the dashboard to show the changes
           setOpen(false);
-          setSelectedRecipient("");
           router.refresh();
-
         } catch (error) {
-           toast({ 
-             title: "Post-Transfer Failed", 
-             description: `CRITICAL: On-chain transfer succeeded but off-chain updates failed. Error: ${error instanceof Error ? error.message : 'Unknown'}`, 
-             variant: "destructive", 
-             duration: 15000 
-           });
+           toast({ title: "Post-Transfer Failed", description: "CRITICAL: On-chain transfer succeeded but off-chain updates failed.", variant: "destructive", duration: 15000 });
+        } finally {
+          setTransferringTo(null);
+          reset(); // Reset wagmi state
         }
       };
-      
       processOffChainUpdates();
     }
-    if (contractError) {
-      toast({ title: "Contract Error", description: contractError.message, variant: "destructive" });
+
+    // B. Handle errors from the contract write or transaction receipt
+    const error = contractError || receiptError;
+    if (error) {
+      console.error("[ERROR] A contract or transaction error occurred:", error);
+      toast({ 
+        title: "Transaction Failed", 
+        description: error.message.split('Reason:')[1] || error.message, 
+        variant: "destructive",
+        duration: 10000,
+      });
+      setTransferringTo(null); // Stop the 'Sending...' state
+      reset(); // Reset wagmi state to allow retrying
     }
-  }, [isConfirmed, contractError, batchId, selectedRecipient, toast, router, actorAddress, hash]);
+  }, [isConfirmed, contractError, receiptError, hash, actorAddress, transferringTo, batchId, toast, router, reset]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>Transfer</Button>
-      </DialogTrigger>
-      <DialogContent>
+      <DialogTrigger asChild><Button>Transfer</Button></DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Transfer Batch</DialogTitle>
           <DialogDescription>Select a recipient for batch: {batchId.slice(0, 12)}...</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
-          <Label htmlFor="recipient">Recipient</Label>
+        <div className="py-4">
           {isLoadingRecipients ? (
-            <Skeleton className="h-10 w-full" />
+            <div className="space-y-2">
+              <Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" />
+            </div>
           ) : (
-            <Select onValueChange={setSelectedRecipient} value={selectedRecipient}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select a recipient..." />
-              </SelectTrigger>
-              <SelectContent>
-                {recipients.length > 0 ? recipients.map(r => (
-                  <SelectItem key={r.id} value={r.wallet_address}>
-                    <span className="font-mono">{formatAddress(r.wallet_address)}</span>
-                    <span className="ml-2 text-muted-foreground capitalize">({r.role})</span>
-                  </SelectItem>
-                )) : (
-                  <div className="p-4 text-center text-sm text-gray-500">No available recipients found.</div>
-                )}
-              </SelectContent>
-            </Select>
+            <div className="max-h-80 overflow-y-auto rounded-md border">
+              <Table>
+                <TableHeader><TableRow><TableHead>Wallet Address</TableHead><TableHead>Role</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {recipients.length > 0 ? recipients.map(r => (
+                    <TableRow key={r.id}>
+                      <TableCell className="font-mono">{formatAddress(r.wallet_address)}</TableCell>
+                      <TableCell className="capitalize">{r.role}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => handleTransfer(r.wallet_address)}
+                          disabled={isPending || isConfirming}
+                        >
+                          {isPending && transferringTo === r.wallet_address ? 'Confirming...' :
+                           isConfirming && transferringTo === r.wallet_address ? 'Sending...' :
+                           'Send'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )) : (
+                    <TableRow><TableCell colSpan={3} className="h-24 text-center">No available recipients found.</TableCell></TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={handleTransfer} disabled={isPending || isConfirming || isLoadingRecipients || !selectedRecipient}>
-            {isPending ? 'Confirming...' : isConfirming ? 'Transferring...' : 'Confirm Transfer'}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

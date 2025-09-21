@@ -10,28 +10,24 @@ export async function POST(request: Request) {
       return new NextResponse(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 
-    // Get user profile from database
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('role, wallet_address')
-      .eq('id', userId)
-      .single();
+    // Read the user's role from the request body
+    const { userRole } = await request.json();
 
-    if (profileError || !profile) {
-      return new NextResponse(JSON.stringify({ 
-        error: 'User profile not found. Please complete your profile setup first.'
-      }), { status: 404 });
+    if (!userRole) {
+      return new NextResponse(JSON.stringify({
+        error: 'User role is missing from the request.'
+      }), { status: 400 });
     }
 
-    // Validate user role
-    if (!['manufacturer', 'distributor', 'retailer'].includes(profile.role)) {
-      return new NextResponse(JSON.stringify({ 
-        error: 'Invalid user role'
+    // Validate the provided user role
+    if (!['manufacturer', 'distributor', 'retailer'].includes(userRole)) {
+      return new NextResponse(JSON.stringify({
+        error: 'Invalid user role provided'
       }), { status: 403 });
     }
 
-    // Get potential recipients based on user's role
-    const recipients = await getPotentialRecipients(userId, profile.role);
+    // Get potential recipients based on the user's ID and the role from the request
+    const recipients = await getPotentialRecipients(userId, userRole);
     
     return NextResponse.json(recipients);
   } catch (error) {
