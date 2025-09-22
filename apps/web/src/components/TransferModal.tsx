@@ -95,6 +95,7 @@ export function TransferModal({ batchId }: TransferModalProps) {
       functionName: 'transferBatch',
       args: [batchIdBytes, recipientWallet as `0x${string}`],
     });
+    
   };
   
   // This effect handles the entire lifecycle of the transaction after it's initiated
@@ -103,26 +104,48 @@ export function TransferModal({ batchId }: TransferModalProps) {
     if (isConfirmed && actorAddress && transferringTo) {
       console.log(`[SUCCESS] Transaction confirmed with hash: ${hash}`);
       toast({ title: "✅ On-Chain Success", description: "Batch transfer confirmed on-chain." });
-      
+
       const processOffChainUpdates = async () => {
         try {
-          // Off-chain updates...
-          await fetch('/api/inventory/transfer', { /* ... */ });
-          await fetch('/api/history/add', { /* ... */ });
+          console.log("[4] Calling /api/inventory/transfer to update off-chain database...");
+          const res = await fetch('/api/inventory/transfer', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            // CRITICAL CHANGE: Properly send transfer details to the API route
+            body: JSON.stringify({ 
+              batchId, 
+              recipientWallet: transferringTo, 
+              senderWallet: actorAddress 
+            }),
+          });
+          
+          if (!res.ok) { // ADDED: Check if the API call was successful (status 200-299)
+            const errorData = await res.json();
+            throw new Error(errorData.error || "Failed to update database.");
+          }
+
           toast({ title: "💾 Off-Chain Success", description: "Database state updated."});
           setOpen(false);
-          router.refresh();
-        } catch (error) {
-           toast({ title: "Post-Transfer Failed", description: "CRITICAL: On-chain transfer succeeded but off-chain updates failed.", variant: "destructive", duration: 15000 });
+          router.refresh(); 
+        } catch (error: any) {
+          console.error("Post-transfer off-chain update failed:", error);
+          toast({ 
+            title: "Post-Transfer Failed", 
+            description: `CRITICAL: On-chain transfer succeeded but off-chain updates failed. ${error.message}`, 
+            variant: "destructive", 
+            duration: 15000 
+          });
         } finally {
           setTransferringTo(null);
-          reset(); // Reset wagmi state
+          reset();
         }
       };
       processOffChainUpdates();
     }
 
-    // B. Handle errors from the contract write or transaction receipt
+    // B. Handle errors from the contract write or transaction receipt (No changes here)
     const error = contractError || receiptError;
     if (error) {
       console.error("[ERROR] A contract or transaction error occurred:", error);
@@ -132,11 +155,11 @@ export function TransferModal({ batchId }: TransferModalProps) {
         variant: "destructive",
         duration: 10000,
       });
-      setTransferringTo(null); // Stop the 'Sending...' state
-      reset(); // Reset wagmi state to allow retrying
+      setTransferringTo(null);
+      reset(); 
     }
+    
   }, [isConfirmed, contractError, receiptError, hash, actorAddress, transferringTo, batchId, toast, router, reset]);
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild><Button>Transfer</Button></DialogTrigger>

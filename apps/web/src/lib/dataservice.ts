@@ -235,6 +235,7 @@ export const createInventoryItem = async (item: any) => {
         quantity: item.quantity,
         status: 'Received',
         created_at: item.created_at,
+        updated_at: item.created_at
       })
       .select().single();
     if (error) {
@@ -281,18 +282,18 @@ export const transferBatchOffChain = async (batchId: string, recipientWallet: st
         if (!validation.valid) {
             throw new Error(`Transfer validation failed: ${validation.error}`);
         }
-
+        console.log(batchId + "|" + recipientWallet + "|" +  senderWallet);
         const supabaseAdmin = getSupabaseAdmin();
         const { data, error } = await supabaseAdmin
             .from('inventory')
             .update({ 
                 current_holder_wallet: null, 
-                intended_recipient_wallet: cleanString(recipientWallet), 
+                intended_recipient_wallet: recipientWallet, 
                 status: 'InTransit',
                 updated_at: new Date().toISOString()
             })
-            .eq('batch_id', cleanString(batchId))
-            .eq('current_holder_wallet', cleanString(senderWallet)) // Additional security check
+            .eq('batch_id', batchId)
+            .eq('current_holder_wallet', senderWallet) // Additional security check
             .select().single();
             
         if (error) throw error;
@@ -313,13 +314,13 @@ export const receiveBatchOffChain = async (batchId: string, receiverWallet: stri
         const { data, error } = await supabaseAdmin
             .from('inventory')
             .update({ 
-                current_holder_wallet: cleanString(receiverWallet), 
+                current_holder_wallet: receiverWallet, 
                 intended_recipient_wallet: null, 
                 status: 'Received',
                 updated_at: new Date().toISOString()
             })
-            .eq('batch_id', cleanString(batchId))
-            .eq('intended_recipient_wallet', cleanString(receiverWallet)) // Additional security check
+            .eq('batch_id', batchId)
+            .eq('intended_recipient_wallet', receiverWallet) // Additional security check
             .select().single();
             
         if (error) throw error;
