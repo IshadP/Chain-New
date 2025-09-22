@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { GrantRoleButton } from '@/components/GrantRoleButton';
 import { Badge } from '@/components/ui/badge';
 import { OnChainRoleChecker } from '@/components/OnChainRoleChecker';
-import { ConnectedWalletInfo } from '@/components/ConnectedWalletInfo'; // <-- IMPORT
+import { ConnectedWalletInfo } from '@/components/ConnectedWalletInfo';
 
 const formatAddress = (address: string | null) => {
     if (!address) return "N/A";
@@ -12,11 +12,11 @@ const formatAddress = (address: string | null) => {
 }
 
 export default async function AdminPage() {
+  // REVERTED: Using the direct, unsecured data service call from the server component
   const profiles = await getAllProfiles();
 
   return (
     <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8">
-      {/* NEW COMPONENT USAGE */}
       <ConnectedWalletInfo />
 
       <Card>
@@ -37,25 +37,29 @@ export default async function AdminPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {profiles.map((profile) => (
-                <TableRow key={profile.id}>
-                  <TableCell className="font-mono">{formatAddress(profile.wallet_address)}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className="capitalize">{profile.role}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <OnChainRoleChecker address={profile.wallet_address as `0x${string}`} />
-                  </TableCell>
-                  <TableCell className="text-right space-x-2">
-                    {profile.role === 'distributor' && (
-                      <GrantRoleButton addressToGrant={profile.wallet_address as `0x${string}`} roleToGrant="Distributor" />
-                    )}
-                    {profile.role === 'retailer' && (
-                      <GrantRoleButton addressToGrant={profile.wallet_address as `0x${string}`} roleToGrant="Retailer" />
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+              {profiles
+                 // Filter out the manufacturer (the user running the page) for a cleaner UI, 
+                 // as they are granted the role by the contract constructor.
+                .filter(profile => profile.role !== 'manufacturer')
+                .map((profile) => (
+                  <TableRow key={profile.id}>
+                    <TableCell className="font-mono">{formatAddress(profile.wallet_address)}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize">{profile.role}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <OnChainRoleChecker address={profile.wallet_address as `0x${string}`} />
+                    </TableCell>
+                    <TableCell className="text-right space-x-2">
+                      {profile.role === 'distributor' && (
+                        <GrantRoleButton addressToGrant={profile.wallet_address as `0x${string}`} roleToGrant="Distributor" />
+                      )}
+                      {profile.role === 'retailer' && (
+                        <GrantRoleButton addressToGrant={profile.wallet_address as `0x${string}`} roleToGrant="Retailer" />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
             </TableBody>
           </Table>
         </CardContent>

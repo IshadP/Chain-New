@@ -1,104 +1,102 @@
-const hre = require("hardhat");
-const fs = require('fs');
-const path = require('path');
+const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
-// Helper to convert string to bytes16
-function toBytes16(text) {
-  const bytes = Buffer.from(text, 'utf8');
-  if (bytes.length > 16) {
-    throw new Error('Input string is too long for bytes16');
-  }
-  const padded = Buffer.concat([bytes], 16);
-  return '0x' + padded.toString('hex');
-}
+// Utility to map the Status enum (0, 1, 2) to readable strings
+// enum Status { Created (0), InTransit (1), Received (2) }
+const STATUS_MAP = ["Created", "InTransit", "Received"];
 
 async function main() {
-  console.log("🌱 Starting blockchain seeding...");
+  // Resolve the path to the deployment file
+  const deploymentPath = path.resolve(
+    __dirname, 
+    "../deployments/latest.json"
+  );
 
-  // Get signers
-  const [manufacturer, distributor, retailer, otherAccount] = await hre.ethers.getSigners();
-  console.log("Accounts loaded:");
-  console.log("  - Manufacturer (Deployer):", manufacturer.address);
-  console.log("  - Distributor:", distributor.address);
-  console.log("  - Retailer:", retailer.address);
-  console.log("  - Other Account:", otherAccount.address);
-  console.log("----------------------------------------------------");
-
-
-  // Deploy the contract
-  console.log("Deploying SupplyChain contract with Manufacturer as deployer...");
-  const SupplyChain = await hre.ethers.getContractFactory("SupplyChain");
-  const supplyChain = await SupplyChain.deploy();
-  await supplyChain.waitForDeployment();
-  const contractAddress = await supplyChain.getAddress();
-  console.log(`✅ SupplyChain contract deployed to: ${contractAddress}`);
-  console.log("----------------------------------------------------");
-
-  // Grant on-chain roles
-  console.log("Granting on-chain roles...");
-  const tx1 = await supplyChain.connect(manufacturer).grantDistributorRole(distributor.address);
-  await tx1.wait();
-  console.log(`  - Granted Distributor role to: ${distributor.address}`);
-
-  const tx2 = await supplyChain.connect(manufacturer).grantRetailerRole(retailer.address);
-  await tx2.wait();
-  console.log(`  - Granted Retailer role to: ${retailer.address}`);
-  console.log("----------------------------------------------------");
-
-
-  // Create some initial batches
-  console.log("Creating initial batches...");
-  const batchId1 = toBytes16("PROD-ABC-123");
-  const tx3 = await supplyChain.connect(manufacturer).createBatch(batchId1, "EW-12345", "Mumbai Warehouse");
-  await tx3.wait();
-  console.log(`  - Created Batch 1 with ID: ${batchId1}`);
-
-  const batchId2 = toBytes16("PROD-XYZ-789");
-  const tx4 = await supplyChain.connect(manufacturer).createBatch(batchId2, "EW-67890", "Mumbai Warehouse");
-  await tx4.wait();
-  console.log(`  - Created Batch 2 with ID: ${batchId2}`);
-  console.log("----------------------------------------------------");
-
-  // Verify on-chain data
-  console.log("Verifying on-chain data...");
-  const isManuf = await supplyChain.isManufacturer(manufacturer.address);
-  const isDist = await supplyChain.isDistributor(distributor.address);
-  const isRet = await supplyChain.isRetailer(retailer.address);
-  const batch1 = await supplyChain.getBatch(batchId1);
-
-  console.log(`  - Is ${manufacturer.address} a manufacturer? ${isManuf}`);
-  console.log(`  - Is ${distributor.address} a distributor? ${isDist}`);
-  console.log(`  - Is ${retailer.address} a retailer? ${isRet}`);
-  console.log(`  - Batch 1 current holder: ${batch1.currentHolder}`);
-  console.log("----------------------------------------------------");
-
-
-  // Save deployment info for the frontend (same as deploy script)
-  console.log("Saving deployment info for the frontend...");
-  const deploymentInfo = {
-    address: contractAddress
-  };
-  const deploymentPath = path.join(__dirname, '..', '..', 'web', 'lib', 'deployment.json');
-  fs.writeFileSync(deploymentPath, JSON.stringify(deploymentInfo, null, 2));
-
-  const abiDir = path.join(__dirname, '..', 'artifacts', 'contracts', 'SupplyChain.sol');
-  const abiSrc = path.join(abiDir, 'SupplyChain.json');
-  const abiDest = path.join(__dirname, '..', '..', 'web', 'lib', 'contracts', 'contracts', 'SupplyChain.sol', 'SupplyChain.json');
-  
-  if (!fs.existsSync(path.dirname(abiDest))) {
-      fs.mkdirSync(path.dirname(abiDest), { recursive: true });
+  if (!fs.existsSync(deploymentPath)) {
+    console.error("Error: Deployment file not found at " + deploymentPath);
+    console.error("Please ensure you have run the deployment script first.");
+    process.exit(1);
   }
-  fs.copyFileSync(abiSrc, abiDest);
-  console.log("  - Deployment info and ABI saved successfully.");
-  console.log("----------------------------------------------------");
 
+  const deployment = JSON.parse(fs.readFileSync(deploymentPath, "utf8"));
+  const contractAddress = deployment.contractAddress;
 
-  console.log("🌱 Seeding complete!");
+  // Get signers to check their roles (Hardhat's default accounts)
+  const [manufacturer, distributor, retailer] = await ethers.getSigners();
+  const SupplyChain = await ethers.getContractFactory("SupplyChain");
+  const supplyChain = SupplyChain.attach(contractAddress);
+
+  console.log("=========================================");
+  console.log("✅ Supply Chain Data Check (Read-Only)");
+  console.log(`Contract Address: ${contractAddress}`);
+  console.log("=========================================");
+  
+  // --- 1. Fetch Role Information ---
+  console.log("\n👤 Role Information:");
+  const addressesToCheck = [
+    { name: "Deployer (Manufacturer)", address: manufacturer.address },
+    { name: "Distributor", address: distributor.address },
+    { name: "Retailer", address: retailer.address },
+  ];
+  
+  for (const { name, address } of addressesToCheck) {
+    // Check role mappings
+    const isM = await supplyChain.isManufacturer(address);
+    const isD = await supplyChain.isDistributor(address);
+    const isR = await supplyChain.isRetailer(address);
+    
+    const roles = [];
+    if (isM) roles.push("Manufacturer");
+    if (isD) roles.push("Distributor");
+    if (isR) roles.push("Retailer");
+    
+    console.log(`- ${name} (${address}): ${roles.join(', ') || 'No Role'}`);
+  }
+
+  // --- 2. Fetch All Batches by Event ---
+  console.log("\n📦 All Batches (Fetched via 'BatchCreated' events):");
+  
+  try {
+    // Query all BatchCreated events to get all batch IDs
+    const filter = supplyChain.filters.BatchCreated();
+    const events = await supplyChain.queryFilter(filter, 0); 
+    
+    const batchIds = events.map(event => event.args.batchId);
+    
+    if (batchIds.length === 0) {
+      console.log("No batches found.");
+    } else {
+      console.log(`Found ${batchIds.length} batches.`);
+      
+      for (const batchId of batchIds) {
+        // Call the view function to get full batch details
+        const batch = await supplyChain.getBatch(batchId);
+        
+        console.log("-----------------------------------------");
+        console.log(`Batch ID:           ${batch.batchId}`);
+        // Convert the numeric status (0, 1, 2) to a readable string
+        console.log(`Status:             ${STATUS_MAP[batch.status]} (code: ${batch.status})`); 
+        console.log(`Creator:            ${batch.creator}`);
+        console.log(`Current Holder:     ${batch.currentHolder}`);
+        console.log(`Intended Recipient: ${batch.intendedRecipient}`);
+        console.log(`E-way Bill:         ${batch.ewaybillNo}`); 
+        console.log(`Location:           ${batch.currentLocation}`);
+        console.log(`Created At:         ${new Date(Number(batch.createdAt) * 1000).toLocaleString()}`);
+        console.log(`Last Updated At:    ${new Date(Number(batch.updatedAt) * 1000).toLocaleString()}`);
+      }
+      console.log("-----------------------------------------");
+    }
+
+  } catch (error) {
+    console.error("\n❌ Error fetching batch data. Ensure the contract is deployed and batches exist.");
+    process.exitCode = 1; // Exit on error
+  }
+
+  console.log("\nChain data check completed!");
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -5,7 +5,7 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadCont
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
-import deployment from '../lib/deployment.json';
+import deployment from '../../lib/deployment.json';
 
 interface GrantRoleButtonProps {
   addressToGrant: `0x${string}`;

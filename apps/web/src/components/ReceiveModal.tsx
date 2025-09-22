@@ -26,7 +26,7 @@ export function ReceiveModal({ batchId }: ReceiveModalProps) {
 
   const handleReceive = () => {
     // Convert UUID batch ID to bytes16 format
-    const batchIdBytes = uuidToBytes16(batchId);
+    const batchIdBytes = batchId;
     
     writeContract({
       address: deployment.address as `0x${string}`,

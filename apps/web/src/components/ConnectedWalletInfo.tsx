@@ -1,21 +1,29 @@
 "use client";
 
 import React from "react";
+// Import isLoading from useReadContract
 import { useAccount, useReadContract } from 'wagmi';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton for loading state
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
-import deployment from '../lib/deployment.json';
+import deployment from '../../lib/deployment.json';
 
 export function ConnectedWalletInfo() {
   const { address, isConnected } = useAccount();
 
-  const { data: isManufacturer } = useReadContract({
+  // Destructure isLoading as isRoleLoading
+  const { 
+    data: isManufacturer, 
+    isLoading: isRoleLoading 
+  } = useReadContract({
     address: deployment.address as `0x${string}`,
     abi: SupplyChainArtifact.abi,
     functionName: 'isManufacturer',
-    args: [address!],
+    // Safely cast 'address' as required by wagmi, relying on 'enabled' to prevent call when undefined
+    args: [address as `0x${string}`],
     query: {
+      // Query is only enabled when a valid address is present
       enabled: !!address,
     },
   });
@@ -32,6 +40,19 @@ export function ConnectedWalletInfo() {
       </Card>
     );
   }
+  
+  // Helper to determine the role badge content
+  const renderRoleStatus = () => {
+    if (isRoleLoading) {
+      return <Skeleton className="h-5 w-20 inline-block align-middle" />;
+    }
+    
+    if (isManufacturer) {
+      return <Badge variant="secondary">Yes</Badge>;
+    }
+    
+    return <Badge variant="destructive">No</Badge>;
+  }
 
   return (
     <Card>
@@ -47,11 +68,7 @@ export function ConnectedWalletInfo() {
         </div>
         <div>
           <strong>On-Chain Manufacturer Status:</strong>{' '}
-          {isManufacturer ? (
-            <Badge variant="secondary">Yes</Badge>
-          ) : (
-            <Badge variant="destructive">No</Badge>
-          )}
+          {renderRoleStatus()}
         </div>
       </CardContent>
     </Card>

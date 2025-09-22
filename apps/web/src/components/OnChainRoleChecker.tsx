@@ -4,7 +4,7 @@ import React, { useEffect, useCallback } from "react";
 import { useReadContract } from 'wagmi';
 import { Badge } from "@/components/ui/badge";
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
-import deployment from '../lib/deployment.json';
+import deployment from '../../lib/deployment.json';
 import { Skeleton } from "./ui/skeleton";
 import { Button } from "./ui/button";
 import { RefreshCw } from "lucide-react";
