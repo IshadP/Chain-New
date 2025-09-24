@@ -104,12 +104,13 @@ contract SupplyChain {
     }
 
     // UPDATED: Modified receiveBatch to ensure only valid roles can receive
-    function receiveBatch(bytes16 _batchId) external batchExists(_batchId) onlyValidRole {
+    function receiveBatch(bytes16 _batchId, string memory _currentLocation) external batchExists(_batchId) onlyValidRole {
         Batch storage batch = products[_batchId];
         require(msg.sender == batch.intendedRecipient, "Caller is not the intended recipient");
         require(batch.status == Status.InTransit, "Batch is not in transit");
         
         batch.currentHolder = msg.sender;
+        batch.currentLocation = _currentLocation;
         batch.intendedRecipient = address(0);
         batch.status = Status.Received;
         batch.updatedAt = block.timestamp;

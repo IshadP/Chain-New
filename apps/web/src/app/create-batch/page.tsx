@@ -54,6 +54,7 @@ export default function CreateBatchPage() {
   const { toast } = useToast();
   const { isConnected } = useAccount();
   const userRole = user?.publicMetadata?.role as string;
+  const manufacturerLocation = user?.publicMetadata?.current_location as string;
 
   const { data: hash, writeContract, isPending: isWalletPending } = useWriteContract();
   const { isSuccess: isConfirmed, isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
@@ -63,7 +64,6 @@ export default function CreateBatchPage() {
   const form = useForm<FormData>({ resolver: zodResolver(formSchema), defaultValues: { /* ... */ } });
   const { register, handleSubmit, control, formState: { errors } } = form;
 
-  // The saveOffChainData function is updated to remove the fields now stored on-chain.
   const saveOffChainData = async (batchId: `0x${string}`, data: FormData) => {
     try {
       const response = await fetch('/api/inventory/add', {
@@ -154,7 +154,12 @@ export default function CreateBatchPage() {
                     </div>
                      <div>
                       <Label htmlFor="currentLocation">Manufacturing Location *</Label>
-                      <Input id="currentLocation" {...register("currentLocation")} disabled={isCreated} className={errors.currentLocation ? 'border-red-500' : ''}/>
+                      <Input 
+                        id="currentLocation" 
+                        {...register("currentLocation")} 
+                        disabled={isCreated || !!manufacturerLocation} 
+                        className={errors.currentLocation ? 'border-red-500' : ''}/>
+                      {manufacturerLocation && <p className="text-xs text-gray-500 mt-1">Location set during onboarding is used.</p>} 
                       {errors.currentLocation && <p className="text-sm text-red-500 mt-1">{errors.currentLocation.message}</p>}
                     </div>
                 </div>

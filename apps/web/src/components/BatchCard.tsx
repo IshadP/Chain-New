@@ -29,7 +29,6 @@ interface BatchCardProps {
 export function BatchCard({ batch, userRole }: BatchCardProps) {
   const { address } = useAccount();
 
-  // Determine user's relationship to this batch
   const isCurrentHolder = batch.current_holder_wallet === address;
   const isIntendedRecipient = batch.intended_recipient_wallet === address;
   const isCreator = batch.manufacturer_wallet === address;

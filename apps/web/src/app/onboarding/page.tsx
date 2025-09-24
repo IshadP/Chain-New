@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAccount } from "wagmi";
 import { updateUserRoleAndProfile } from "./_actions";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConnectWallet } from "@/components/ConnectWallet";
@@ -20,6 +21,7 @@ export default function OnboardingPage() {
   const { address: walletAddress, isConnected } = useAccount();
 
   const [selectedRole, setSelectedRole] = useState<Role | "">("");
+  const [currentLocation, setCurrentLocation] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleRoleSelection = (value: Role) => {
@@ -27,7 +29,7 @@ export default function OnboardingPage() {
   };
 
   const handleCompleteOnboarding = async () => {
-    if (!user || !selectedRole || !walletAddress) {
+    if (!user || !selectedRole || !walletAddress || !currentLocation) {
       toast({
         title: "Error",
         description: "Please select a role and connect your wallet.",
@@ -42,6 +44,7 @@ export default function OnboardingPage() {
       await updateUserRoleAndProfile({
         role: selectedRole,
         walletAddress: walletAddress,
+        currentLocation: currentLocation
       });
 
       // CRITICAL STEP: Reload the user object on the client.
@@ -98,6 +101,17 @@ export default function OnboardingPage() {
             <div className="p-4 border rounded-md flex items-center justify-center">
               <ConnectWallet />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="font-semibold">Step 2: Enter Your Current Location *</h3> {/* ADDED BLOCK */}
+            <Input 
+              type="text"
+              value={currentLocation}
+              onChange={(e) => setCurrentLocation(e.target.value)}
+              placeholder="e.g., Warehouse A, New York"
+              required
+            />
           </div>
           
           <Button

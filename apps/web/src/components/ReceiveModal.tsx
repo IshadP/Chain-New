@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { useUser } from "@clerk/nextjs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useWriteContract, useWaitForTransactionReceipt, useAccount } from 'wagmi';
 import SupplyChainArtifact from '../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
@@ -19,20 +20,25 @@ interface ReceiveModalProps {
 export function ReceiveModal({ batchId }: ReceiveModalProps) {
   const { toast } = useToast();
   const router = useRouter();
+   const { user } = useUser();
   const { address: actorAddress } = useAccount(); // Get the receiver's wallet
+  const currentLocation = user?.publicMetadata?.current_location as string;
 
   const { data: hash, writeContract, isPending, error: contractError } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
 
   const handleReceive = () => {
-    // Convert UUID batch ID to bytes16 format
+    if (!currentLocation) { // ADDED check
+        toast({ title: "Error", description: "Your current location is missing. Please complete your profile.", variant: "destructive" });
+        return;
+    }
     const batchIdBytes = batchId;
     
     writeContract({
       address: deployment.address as `0x${string}`,
       abi: SupplyChainArtifact.abi,
       functionName: 'receiveBatch',
-      args: [batchIdBytes],
+      args: [batchIdBytes, currentLocation],
     });
   };
   
