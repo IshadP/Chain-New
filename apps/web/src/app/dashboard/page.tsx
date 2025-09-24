@@ -17,7 +17,7 @@ import { TransferModal } from '@/components/TransferModal';
 import { ReceiveModal } from '@/components/ReceiveModal';
 
 // ICON IMPORTS
-import { Package, Clock, CheckCircle, Plus, PawPrint } from 'lucide-react';
+import { Package, Clock, CheckCircle, Plus, PawPrint, TicketCheckIcon } from 'lucide-react';
 
 // Unified Batch Interface 
 interface Batch {
@@ -114,7 +114,7 @@ export default function DashboardPage() {
                     <TableHead className="w-[12%]">Status</TableHead>
                     <TableHead className="w-[15%]">Relationship</TableHead>
                     <TableHead className="text-right w-[10%]">Qty</TableHead>
-                    <TableHead className="text-right w-[15%] hidden sm:table-cell">Cost</TableHead>
+                    <TableHead className="text-right w-[15%] hidden sm:table-cell">Cost (In Rupee)</TableHead>
                     <TableHead className="w-[18%] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -131,7 +131,7 @@ export default function DashboardPage() {
                     const statusBadge = (() => {
                         switch (batch.status) {
                           case 'Received':
-                            return <Badge className="bg-green-100 text-green-800 hover:bg-green-100 text-xs"><CheckCircle className="w-3 h-3 mr-1" />Received</Badge>;
+                            return <Badge className="bg-green-100 text-green-800 hover:bg-green-100 text-xs p-2">Received</Badge>;
                           case 'InTransit':
                             return <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100 text-xs"><Clock className="w-3 h-3 mr-1" />In Transit</Badge>;
                           default:
@@ -158,7 +158,7 @@ export default function DashboardPage() {
                         <TableCell>{statusBadge}</TableCell>
                         <TableCell>{relationshipBadge}</TableCell>
                         <TableCell className="text-right">{batch.quantity}</TableCell>
-                        <TableCell className="text-right hidden sm:table-cell">${batch.cost.toFixed(2)}</TableCell>
+                        <TableCell className="text-right hidden sm:table-cell">{batch.cost.toFixed(2)}</TableCell>
                         <TableCell className="text-right">
                           <div className="flex gap-2 justify-end">
                             {canTransfer && <TransferModal batchId={batch.batch_id} />}

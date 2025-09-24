@@ -33,7 +33,7 @@ const cleanString = (str: string | null | undefined): string => {
  * This is a critical link between a Clerk user ID and their wallet address.
  * Uses the admin client to bypass RLS, as it's called from a trusted server action.
  */
-export const upsertUserProfile = async (profile: { id: string; role: 'manufacturer' | 'distributor' | 'retailer'; wallet_address: string; }) => {
+export const upsertUserProfile = async (profile: { id: string; role: 'manufacturer' | 'distributor' | 'retailer'; wallet_address: string; currentLocation: string; }) => {
     try {
         const cleanId = cleanString(profile.id);
         const cleanWallet = cleanString(profile.wallet_address);
@@ -41,7 +41,7 @@ export const upsertUserProfile = async (profile: { id: string; role: 'manufactur
             throw new Error("User ID, role, and wallet address are required.");
         }
         const supabaseAdmin = getSupabaseAdmin();
-        const { data, error } = await supabaseAdmin.from('profiles').upsert({ id: cleanId, role: profile.role, wallet_address: cleanWallet }).select().single();
+        const { data, error } = await supabaseAdmin.from('profiles').upsert({ id: cleanId, role: profile.role, wallet_address: cleanWallet, currentLocation: profile.currentLocation }).select().single();
         if (error) throw new Error(`Database error: ${error.message}`);
         if (!data) throw new Error('No data returned from database after upsert');
         return data;

@@ -24,12 +24,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ArrowUpRight, Send } from "lucide-react";
 
 // Define the structure of the recipient data
 interface Recipient {
   id: string;
   wallet_address: string;
   role: string;
+  currentLocation: string;
 }
 
 // Helper to format wallet addresses
@@ -162,7 +164,7 @@ export function TransferModal({ batchId }: TransferModalProps) {
   }, [isConfirmed, contractError, receiptError, hash, actorAddress, transferringTo, batchId, toast, router, reset]);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild><Button>Transfer</Button></DialogTrigger>
+      <DialogTrigger asChild><Button className="bg-green-200 text-green-700 border-1 border-green-700 hover:bg-green-700 hover:text-green-200"><Send/>Transfer</Button></DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Transfer Batch</DialogTitle>
@@ -176,18 +178,19 @@ export function TransferModal({ batchId }: TransferModalProps) {
           ) : (
             <div className="max-h-80 overflow-y-auto rounded-md border">
               <Table>
-                <TableHeader><TableRow><TableHead>Wallet Address</TableHead><TableHead>Role</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Wallet Address</TableHead><TableHead>Role</TableHead><TableHead>Location</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {recipients.length > 0 ? recipients.map(r => (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono">{formatAddress(r.wallet_address)}</TableCell>
                       <TableCell className="capitalize">{r.role}</TableCell>
+                      <TableCell className="capitalize">{r.currentLocation}</TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
                           onClick={() => handleTransfer(r.wallet_address)}
                           disabled={isPending || isConfirming}
-                        >
+                        > <ArrowUpRight />
                           {isPending && transferringTo === r.wallet_address ? 'Confirming...' :
                            isConfirming && transferringTo === r.wallet_address ? 'Sending...' :
                            'Send'}
