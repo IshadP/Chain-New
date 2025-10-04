@@ -1,64 +1,66 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
-import { NextRequest, NextResponse } from 'next/server'
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-const isOnboardingRoute = createRouteMatcher(['/onboarding'])
-const isPublicRoute = createRouteMatcher(['/public-route-example'])
-const isDashboardRoute = createRouteMatcher(['/dashboard'])
+// 1. Define all route matchers
+// Public routes are accessible to everyone, logged in or not (initially).
+const isPublicRoute = createRouteMatcher(['/', '/batch/(.*)', '/sign-in(.*)', '/sign-up(.*)']);
+// The onboarding route needs to be identified to handle special redirection logic.
+const isOnboardingRoute = createRouteMatcher(['/onboarding']);
 
+// Define session metadata type for clarity and type safety.
 interface SessionMetadata {
   onboardingComplete?: boolean;
   role?: 'manufacturer' | 'distributor' | 'retailer';
 }
 
 export default clerkMiddleware(async (auth, req: NextRequest) => {
-  const { isAuthenticated, sessionClaims, redirectToSignIn } = await auth()
+  const { userId, sessionClaims } = await auth();
   const metadata = sessionClaims?.metadata as SessionMetadata;
 
-  // If the user isn't signed in and the route is private, redirect to sign-in
-  if (!isAuthenticated && !isPublicRoute(req)) {
-    return redirectToSignIn({ returnBackUrl: req.url })
-  }
+  // --- Logic for Authenticated Users ---
+  if (userId) {
+    const onboardingComplete = metadata?.onboardingComplete === true;
+    const hasValidRole = metadata?.role && ['manufacturer', 'distributor', 'retailer'].includes(metadata.role);
+    const isFullyOnboarded = onboardingComplete && hasValidRole;
 
-  // If user is authenticated, check their onboarding status
-  if (isAuthenticated) {
-    const hasValidRole = metadata?.role && ['manufacturer', 'distributor', 'retailer'].includes(metadata.role)
-    const isOnboardingComplete = metadata?.onboardingComplete === true
-
-     if (req.nextUrl.pathname === '/') {
-    if (isOnboardingComplete && hasValidRole) {
-      console.log('Redirecting from root to dashboard')
-      const dashboardUrl = new URL('/dashboard', req.url)
-      return NextResponse.redirect(dashboardUrl)
-    } else {
-      console.log('Redirecting from root to onboarding')
-      const onboardingUrl = new URL('/onboarding', req.url)
-      return NextResponse.redirect(onboardingUrl)
-    }
-  }
-
-    // If user is on onboarding route and already completed onboarding with valid role, redirect to dashboard
-    if (isOnboardingRoute(req) && isOnboardingComplete && hasValidRole) {
-      const dashboardUrl = new URL('/dashboard', req.url)
-      return NextResponse.redirect(dashboardUrl)
-    }
-
-    // If user is visiting onboarding route and hasn't completed onboarding, allow access
+    // Case 1: User is on the onboarding page.
     if (isOnboardingRoute(req)) {
-      return NextResponse.next()
+      // If they are already fully onboarded, they don't need to be here. Redirect to dashboard.
+      if (isFullyOnboarded) {
+        return NextResponse.redirect(new URL('/dashboard', req.url));
+      }
+      // Otherwise, they are in the right place. Allow access.
+      return NextResponse.next();
     }
 
-    // If user hasn't completed onboarding or doesn't have a valid role, redirect to onboarding
-    if (!isOnboardingComplete || !hasValidRole) {
-      const onboardingUrl = new URL('/onboarding', req.url)
-      return NextResponse.redirect(onboardingUrl)
+    // Case 2: User is NOT fully onboarded and is trying to access any other page.
+    // Force them to the onboarding page to complete their profile.
+    if (!isFullyOnboarded) {
+      return NextResponse.redirect(new URL('/onboarding', req.url));
+    }
+    
+    // Case 3: User IS fully onboarded and lands on the public homepage.
+    // Redirect them directly to their dashboard.
+    if (isFullyOnboarded && req.nextUrl.pathname === '/') {
+       return NextResponse.redirect(new URL('/dashboard', req.url));
     }
 
-    // If user is authenticated and onboarding is complete with valid role, allow access to protected routes
-    return NextResponse.next()
+    // If none of the above, the user is authenticated, fully onboarded, 
+    // and accessing an allowed page (like /dashboard or /batch/...). Let them proceed.
+    return NextResponse.next();
   }
 
-  return NextResponse.next()
-})
+  // --- Logic for Unauthenticated Users ---
+  // If an unauthenticated user tries to access a route that is NOT public, protect it.
+  // Clerk will automatically redirect them to the sign-in page.
+  if (!isPublicRoute(req)) {
+    // FIX: await auth() before calling protect()
+    await auth.protect();
+  }
+
+  // If the route is public, allow access for the unauthenticated user.
+  return NextResponse.next();
+});
 
 export const config = {
   matcher: [
@@ -67,4 +69,4 @@ export const config = {
     // Always run for API routes
     '/(api|trpc)(.*)',
   ],
-}
+};

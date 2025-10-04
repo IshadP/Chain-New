@@ -173,6 +173,21 @@ export const getUserProfileByWallet = async (walletAddress: string) => {
     }
 };
 
+export async function getBatchById(batchId: string) {
+  const { data, error } = await supabase
+    .from('inventory')
+    .select('product_name') // Select only the fields you need for the modal
+    .eq('batch_id', batchId)
+    .single(); // Use .single() to get one record
+
+  if (error) {
+    console.error('Error fetching batch by ID:', error);
+    throw new Error('Could not fetch batch details from the database.');
+  }
+
+  return data;
+}
+
 /**
  * NEW: Validate transfer before executing (for additional security)
  */

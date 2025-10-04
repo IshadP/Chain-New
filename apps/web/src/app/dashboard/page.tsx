@@ -9,17 +9,15 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ConnectWallet } from '@/components/ConnectWallet';
 
-// NEW TABLE IMPORTS
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-
-// ACTION MODAL IMPORTS (from BatchCard)
 import { TransferModal } from '@/components/TransferModal';
 import { ReceiveModal } from '@/components/ReceiveModal';
+import { Package, Clock, Plus } from 'lucide-react';
 
-// ICON IMPORTS
-import { Package, Clock, CheckCircle, Plus, PawPrint, TicketCheckIcon } from 'lucide-react';
+// Import the new modal component
+import { BatchHistoryModal } from '@/components/BatchHistoryModal';
 
-// Unified Batch Interface 
+// Unified Batch Interface from Supabase
 interface Batch {
   batch_id: string;
   product_name: string;
@@ -41,6 +39,10 @@ export default function DashboardPage() {
   
   const [batches, setBatches] = useState<Batch[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // State for the new history modal
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchBatches = async () => {
@@ -65,6 +67,12 @@ export default function DashboardPage() {
     fetchBatches();
   }, [address, isConnected]); 
 
+  // Handler to open the modal with the correct batch ID
+  const handleRowClick = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    setIsHistoryModalOpen(true);
+  };
+
   return (
     <div className="mx-auto pt-6">
       <header className="flex justify-between items-center mb-8 pb-4 border-b px-4">
@@ -74,36 +82,37 @@ export default function DashboardPage() {
             Your Role: <Badge>{userRole}</Badge>
           </p>
         </div>
-        <div className='flex items-center gap-4'>            
+        <div className='flex items-center gap-4'>
+            <Link href="/blockchain-view">
+              Blockchain View
+            </Link>           
             <ConnectWallet />
             <UserButton />
         </div>
       </header>
-
+      
       <main>
         {isLoading ? (
           <div className="text-center py-16 text-gray-500">
             <h2 className="text-2xl font-semibold">Loading Batches...</h2>
           </div>
         ) : !isConnected ? (
-           <div className="text-center py-16 text-gray-500">
+          <div className="text-center py-16 text-gray-500">
             <h2 className="text-2xl font-semibold">Wallet Not Connected</h2>
             <p>Please connect your wallet to view your batches.</p>
           </div>
         ) : batches.length > 0 ? (
           
           <div className="px-4">
-            {/* BATCH COUNT ELEMENT - PLACED ABOVE THE TABLE */}
             <div className="flex justify-between items-center mb-4">
-                <p className="text-lg font-semibold text-gray-700">
-                    Total Inventory: <span className="text-blue-600">{batches.length}</span> Batches Found
-                </p>
-                {userRole === 'manufacturer' && (
-              <Button asChild>
-                
-                <Link href="/create-batch"> <Plus className=''/> Create New Batch</Link>
-              </Button>
-            )}
+              <p className="text-lg font-semibold text-gray-700">
+                  Total Inventory: <span className="text-blue-600">{batches.length}</span> Batches Found
+              </p>
+              {userRole === 'manufacturer' && (
+                <Button asChild>
+                  <Link href="/create-batch"> <Plus className='mr-2 h-4 w-4'/> Create New Batch</Link>
+                </Button>
+              )}
             </div>
             
             <div className="bg-white border rounded-lg shadow-sm">
@@ -147,7 +156,7 @@ export default function DashboardPage() {
                     })();
 
                     return (
-                      <TableRow key={batch.batch_id}>
+                      <TableRow key={batch.batch_id} onClick={() => handleRowClick(batch.batch_id)} className="cursor-pointer hover:bg-gray-50">
                         <TableCell className="font-medium">
                           <div className="flex items-center">
                             <Package className="w-4 h-4 mr-2 text-blue-600 hidden sm:block" />
@@ -159,7 +168,7 @@ export default function DashboardPage() {
                         <TableCell>{relationshipBadge}</TableCell>
                         <TableCell className="text-right">{batch.quantity}</TableCell>
                         <TableCell className="text-right hidden sm:table-cell">{batch.cost.toFixed(2)}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex gap-2 justify-end">
                             {canTransfer && <TransferModal batchId={batch.batch_id} />}
                             {canReceive && <ReceiveModal batchId={batch.batch_id} /> }
@@ -176,9 +185,24 @@ export default function DashboardPage() {
           <div className="text-center py-16 text-gray-500">
             <h2 className="text-2xl font-semibold">No batches found.</h2>
             <p>There are no batches currently associated with your wallet address.</p>
+            {userRole === 'manufacturer' && (
+              <Button asChild className="mt-4">
+                <Link href="/create-batch">
+                  <Plus className="mr-2 h-4 w-4" /> Create New Batch
+                </Link>
+              </Button>
+            )}
           </div>
         )}
       </main>
+
+      {selectedBatchId && (
+        <BatchHistoryModal 
+          batchId={selectedBatchId} 
+          isOpen={isHistoryModalOpen} 
+          onOpenChange={setIsHistoryModalOpen} 
+        />
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "qrcode.react": "^4.2.0"
   }
 }

@@ -22,7 +22,7 @@ import { Package, QrCode, AlertCircle } from 'lucide-react';
 import SupplyChainArtifact from '../../../lib/contracts/contracts/SupplyChain.sol/SupplyChain.json';
 import deployment from '../../../lib/deployment.json';
 
-// Zod schema remains the same, as we still need to collect this data.
+// Zod schema for form validation
 const formSchema = z.object({
   productName: z.string().min(1, 'Product name is required'),
   cost: z.coerce.number().positive('Cost must be a positive number'),
@@ -36,7 +36,6 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
-// ... (helper components and constants remain the same)
 interface BatchCreationState {
   qrCodeUrl: string;
   batchId: `0x${string}` | null;
@@ -56,12 +55,18 @@ export default function CreateBatchPage() {
   const userRole = user?.publicMetadata?.role as string;
   const manufacturerLocation = user?.publicMetadata?.current_location as string;
 
-  const { data: hash, writeContract, isPending: isWalletPending } = useWriteContract();
+  const { data: hash, writeContract, isPending: isWalletPending, error } = useWriteContract();
   const { isSuccess: isConfirmed, isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
 
   const [state, setState] = useState<BatchCreationState>({ qrCodeUrl: '', batchId: null });
 
-  const form = useForm<FormData>({ resolver: zodResolver(formSchema), defaultValues: { /* ... */ } });
+  const form = useForm<FormData>({ 
+    resolver: zodResolver(formSchema), 
+    defaultValues: {
+      currentLocation: manufacturerLocation || '', // Pre-fill location from user metadata
+      // Set other defaults if needed
+    } 
+  });
   const { register, handleSubmit, control, formState: { errors } } = form;
 
   const saveOffChainData = async (batchId: `0x${string}`, data: FormData) => {
@@ -79,28 +84,27 @@ export default function CreateBatchPage() {
           quantity: data.quantity,
           status: 'Received',
           created_at: new Date().toISOString(),
+          // UPDATED: Also save on-chain data to the database for easier access
+          current_location: data.currentLocation,
+          ewaybill_no: data.ewaybillNo,
         }),
       });
-      if (!response.ok) throw new Error((await response.json()).error || 'Failed to save');
-      toast({ title: 'Database Success!', description: 'Off-chain details saved.' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Failed to save off-chain data');
+      toast({ title: 'Database Success!', description: 'Off-chain batch details have been saved.' });
     } catch (error) {
-      toast({ title: "Database Save Failed", description: `CRITICAL: The batch is on-chain, but saving failed. Batch ID: ${batchId}. Error: ${error instanceof Error ? error.message : 'Unknown'}`, variant: "destructive", duration: 15000 });
+      toast({ title: "Database Save Failed", description: `CRITICAL: The batch is on-chain, but saving off-chain data failed. Batch ID: ${batchId}. Error: ${error instanceof Error ? error.message : 'Unknown'}`, variant: "destructive", duration: 15000 });
     }
   };
 
   const onFormSubmit = (data: FormData) => {
     if (!isConnected || !user || userRole?.toLowerCase() !== 'manufacturer') {
-      toast({ title: 'Access Denied', variant: 'destructive' });
+      toast({ title: 'Access Denied', description: 'You must be a manufacturer and have a connected wallet.', variant: 'destructive' });
       return;
     }
     const newUuid = uuidv4();
     const batchIdAsBytes16 = uuidToBytes16(newUuid);
     setState(prev => ({ ...prev, batchId: batchIdAsBytes16 }));
 
-    /**
-     * UPDATED
-     * The on-chain call now includes the ewaybillNo and currentLocation.
-     */
     writeContract({
       address: contractAddress,
       abi: abi,
@@ -116,20 +120,30 @@ export default function CreateBatchPage() {
   useEffect(() => {
     if (isConfirmed && state.batchId) {
       const generateQrAndSave = async () => {
-        const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/track/${state.batchId}`);
+        // UPDATED: Changed URL from '/track/' to '/batch/' to match the public page route
+        const qrDataUrl = await QRCode.toDataURL(`${window.location.origin}/batch/${state.batchId}`);
         setState(prev => ({ ...prev, qrCodeUrl: qrDataUrl }));
-        toast({ title: 'Batch Created On-Chain!', description: `On-chain record created successfully.` });
+        toast({ title: 'Batch Created On-Chain!', description: `The blockchain record was created successfully.` });
         await saveOffChainData(state.batchId, form.getValues());
       };
       generateQrAndSave();
     }
   }, [isConfirmed, state.batchId]);
 
-  // The rest of the UI remains exactly the same.
-  // ...
-  if (userRole?.toLowerCase() !== 'manufacturer') { return ( <div className="container mx-auto p-8 text-center"> <Alert variant="destructive"><AlertCircle className="h-4 w-4" />Access Denied: Only manufacturers can create batches.</Alert> </div> ); }
+  if (userRole?.toLowerCase() !== 'manufacturer') { 
+    return ( 
+      <div className="container mx-auto p-8 text-center"> 
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          Access Denied: Only manufacturers can create batches.
+        </Alert> 
+      </div> 
+    ); 
+  }
+
   const isLoading = isWalletPending || isConfirming;
   const isCreated = isConfirmed && !!state.qrCodeUrl;
+
   return (
     <div className="container mx-auto p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
@@ -152,14 +166,14 @@ export default function CreateBatchPage() {
                       <Input id="ewaybillNo" {...register("ewaybillNo")} disabled={isCreated} className={errors.ewaybillNo ? 'border-red-500' : ''}/>
                       {errors.ewaybillNo && <p className="text-sm text-red-500 mt-1">{errors.ewaybillNo.message}</p>}
                     </div>
-                     <div>
+                      <div>
                       <Label htmlFor="currentLocation">Manufacturing Location *</Label>
                       <Input 
                         id="currentLocation" 
                         {...register("currentLocation")} 
                         disabled={isCreated || !!manufacturerLocation} 
                         className={errors.currentLocation ? 'border-red-500' : ''}/>
-                      {manufacturerLocation && <p className="text-xs text-gray-500 mt-1">Location set during onboarding is used.</p>} 
+                      {manufacturerLocation && <p className="text-xs text-gray-500 mt-1">Your default location is being used.</p>} 
                       {errors.currentLocation && <p className="text-sm text-red-500 mt-1">{errors.currentLocation.message}</p>}
                     </div>
                 </div>
@@ -187,7 +201,7 @@ export default function CreateBatchPage() {
                       <Label htmlFor="category">Category *</Label>
                       <Controller control={control} name="category" render={({ field }) => (
                           <Select onValueChange={field.onChange} value={field.value} disabled={isCreated}>
-                            <SelectTrigger className={errors.category ? 'border-red-500' : ''}><SelectValue placeholder="Select" /></SelectTrigger>
+                            <SelectTrigger className={errors.category ? 'border-red-500' : ''}><SelectValue placeholder="Select a category" /></SelectTrigger>
                             <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                           </Select>
                       )}/>
@@ -205,7 +219,7 @@ export default function CreateBatchPage() {
                   </div>
                 </div>
                 <Button type="submit" className="w-full" disabled={isLoading || isCreated}>
-                    {isLoading ? 'Processing On-Chain...' : 'Create Batch'}
+                  {isLoading ? 'Processing On-Chain...' : isCreated ? 'Batch Created' : 'Create Batch'}
                 </Button>
               </form>
             </CardContent>
@@ -216,7 +230,7 @@ export default function CreateBatchPage() {
               {!isCreated ? (
                 <div className="text-gray-500">
                   <QrCode className="h-16 w-16 mx-auto mb-4 opacity-50" />
-                  <p>QR code for on-chain tracking will appear here.</p>
+                  <p>QR code for on-chain tracking will appear here after creation.</p>
                 </div>
               ) : (
                 <div className="space-y-4 w-full">
@@ -236,4 +250,3 @@ export default function CreateBatchPage() {
     </div>
   );
 }
-
