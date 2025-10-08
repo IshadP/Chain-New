@@ -11,7 +11,7 @@ const contractAddress = deployment.address as `0x${string}`;
 
 // --- CONFIGURATION ---
 // Explicitly define the RPC URL for the local Hardhat node.
-const hardhatRpcUrl = 'http://127.0.0.1:8545';
+const hardhatRpcUrl =  'http://10.122.238.16:8545';
 
 // --- VIEM PUBLIC CLIENT ---
 // Create a more robust public client with the explicit RPC URL.
