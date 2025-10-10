@@ -83,9 +83,12 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className='flex items-center gap-4'>
-            <Link href="/blockchain-view">
-              Blockchain View
-            </Link>           
+          <Link className="text-gray-500 dark:text-gray-400" href="/admin">
+            Admin
+          </Link>
+            <Link className="text-gray-500 dark:text-gray-400" href="/blockchain-view">
+            Blockchain View
+          </Link>           
             <ConnectWallet />
             <UserButton />
         </div>

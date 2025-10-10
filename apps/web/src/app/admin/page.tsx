@@ -5,6 +5,9 @@ import { GrantRoleButton } from '@/components/GrantRoleButton';
 import { Badge } from '@/components/ui/badge';
 import { OnChainRoleChecker } from '@/components/OnChainRoleChecker';
 import { ConnectedWalletInfo } from '@/components/ConnectedWalletInfo';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { ArrowLeftIcon } from 'lucide-react';
 
 const formatAddress = (address: string | null) => {
     if (!address) return "N/A";
@@ -16,9 +19,14 @@ export default async function AdminPage() {
   const profiles = await getAllProfiles();
 
   return (
-    <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8">
+    <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8 flex gap-2 flex-col">
+      <Link href="/dashboard" className='mb-2'>
+              <Button variant="outline">
+                <ArrowLeftIcon className="w-4 h-4 mr-2" />
+                Back to Dashboard
+              </Button>
+      </Link>
       <ConnectedWalletInfo />
-
       <Card>
         <CardHeader>
           <CardTitle>User Role Management</CardTitle>

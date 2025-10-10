@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useReadContracts } from 'wagmi';
 import { format } from 'date-fns';
-// MODIFICATION: Import the correct library and Image component
 import QRCode from 'qrcode';
 import Image from 'next/image';
 
@@ -34,7 +33,6 @@ interface BatchHistoryModalProps {
 
 export function BatchHistoryModal({ batchId, isOpen, onOpenChange }: BatchHistoryModalProps) {
   const [offChainDetails, setOffChainDetails] = useState<BatchDetails | null>(null);
-  // MODIFICATION: Add state to hold the generated QR code image URL
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
   const { data: onChainData, isLoading: isOnChainLoading } = useReadContracts({
@@ -109,7 +107,6 @@ export function BatchHistoryModal({ batchId, isOpen, onOpenChange }: BatchHistor
             <div className="text-center">
               <h3 className="font-semibold mb-4">QR Code</h3>
               <div className="bg-white p-2 rounded-lg inline-block shadow-md border">
-                {/* MODIFICATION: Use the standard Image component with the generated URL */}
                 {qrCodeUrl && (
                   <Image
                     src={qrCodeUrl}

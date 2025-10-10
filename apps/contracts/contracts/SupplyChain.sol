@@ -118,7 +118,7 @@ contract SupplyChain {
 
         batchHistory[_batchId].push(HistoryEvent({
             timestamp: block.timestamp,
-            eventDescription: "Batch Shipped",
+            eventDescription: "Batch Transfer(In Transit)",
             location: batch.currentLocation,
             actor: msg.sender
         }));
@@ -140,7 +140,7 @@ contract SupplyChain {
 
         batchHistory[_batchId].push(HistoryEvent({
             timestamp: block.timestamp,
-            eventDescription: "Batch Shipped",
+            eventDescription: "Batch Received",
             location: batch.currentLocation,
             actor: msg.sender
         }));

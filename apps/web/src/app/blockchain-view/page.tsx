@@ -1,4 +1,5 @@
 import { BlockchainDataTable } from "@/components/BlockchainDataTable";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -6,11 +7,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import Link from "next/link";
+import { ArrowLeftIcon } from "lucide-react";
 
 export default function BlockchainViewPage() {
   return (
-    <div className="container mx-auto p-4">
-      <Card>
+    <div className="container mx-auto p-4 flex gap-2 flex-col">
+      <Link href="/dashboard" className="">
+              <Button variant="outline">
+                <ArrowLeftIcon className="w-4 h-4 mr-2" />
+                Back to Dashboard
+              </Button>
+      </Link>
+      <Card className="">
         <CardHeader>
           <CardTitle>On-Chain Data</CardTitle>
           <CardDescription>

@@ -92,10 +92,8 @@ export default function BatchDetailsPage() {
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div><strong>Status:</strong> <Badge>{getStatusText(batch.status)}</Badge></div>
           <div><strong>Current Location:</strong> {batch.currentLocation}</div>
-          <div><strong>eWay Bill No:</strong> {batch.ewaybillNo}</div>
           <div><strong>Created On:</strong> {format(new Date(Number(batch.createdAt) * 1000), "PPpp")}</div>
-          <div className="col-span-1 md:col-span-2"><strong>Current Holder:</strong> <span className="font-mono text-xs">{batch.currentHolder}</span></div>
-          <div className="col-span-1 md:col-span-2"><strong>Creator:</strong> <span className="font-mono text-xs">{batch.creator}</span></div>
+          
         </CardContent>
       </Card>
 
